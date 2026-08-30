@@ -1,0 +1,269 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A4000000000000000000101 /* UpscaleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000001 /* UpscaleApp.swift */; };
+		A4000000000000000000102 /* UpscaleCore in Frameworks */ = {isa = PBXBuildFile; productRef = A4000000000000000000301 /* UpscaleCore */; };
+		A4000000000000000000103 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000003 /* ContentView.swift */; };
+		A4000000000000000000104 /* JobRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000004 /* JobRow.swift */; };
+		A4000000000000000000105 /* JobQueue+OpenPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000005 /* JobQueue+OpenPanel.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A4000000000000000000001 /* UpscaleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpscaleApp.swift; sourceTree = "<group>"; };
+		A4000000000000000000002 /* Upscale.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Upscale.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A4000000000000000000003 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ContentView.swift"; sourceTree = "<group>"; };
+		A4000000000000000000004 /* JobRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "JobRow.swift"; sourceTree = "<group>"; };
+		A4000000000000000000005 /* JobQueue+OpenPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "JobQueue+OpenPanel.swift"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A4000000000000000000201 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A4000000000000000000102 /* UpscaleCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A4000000000000000000401 = {
+			isa = PBXGroup;
+			children = (
+				A4000000000000000000402 /* Upscale */,
+				A4000000000000000000403 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A4000000000000000000402 /* Upscale */ = {
+			isa = PBXGroup;
+			children = (
+				A4000000000000000000001 /* UpscaleApp.swift */,
+				A4000000000000000000003 /* ContentView.swift */,
+				A4000000000000000000004 /* JobRow.swift */,
+				A4000000000000000000005 /* JobQueue+OpenPanel.swift */,
+			);
+			path = Upscale;
+			sourceTree = "<group>";
+		};
+		A4000000000000000000403 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A4000000000000000000002 /* Upscale.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A4000000000000000000501 /* Upscale */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A4000000000000000000601 /* Build configuration list for PBXNativeTarget "Upscale" */;
+			buildPhases = (
+				A4000000000000000000202 /* Sources */,
+				A4000000000000000000201 /* Frameworks */,
+				A4000000000000000000203 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Upscale;
+			packageProductDependencies = (
+				A4000000000000000000301 /* UpscaleCore */,
+			);
+			productName = Upscale;
+			productReference = A4000000000000000000002 /* Upscale.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A4000000000000000000701 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					A4000000000000000000501 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+				};
+			};
+			buildConfigurationList = A4000000000000000000602 /* Build configuration list for PBXProject "Upscale" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A4000000000000000000401;
+			packageReferences = (
+				A4000000000000000000801 /* XCLocalSwiftPackageReference ".." */,
+			);
+			productRefGroup = A4000000000000000000403 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A4000000000000000000501 /* Upscale */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A4000000000000000000203 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A4000000000000000000202 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A4000000000000000000101 /* UpscaleApp.swift in Sources */,
+				A4000000000000000000103 /* ContentView.swift in Sources */,
+				A4000000000000000000104 /* JobRow.swift in Sources */,
+				A4000000000000000000105 /* JobQueue+OpenPanel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A4000000000000000000901 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A4000000000000000000902 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A4000000000000000000903 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.upscale.Upscale;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A4000000000000000000904 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.upscale.Upscale;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A4000000000000000000601 /* Build configuration list for PBXNativeTarget "Upscale" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A4000000000000000000903 /* Debug */,
+				A4000000000000000000904 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A4000000000000000000602 /* Build configuration list for PBXProject "Upscale" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A4000000000000000000901 /* Debug */,
+				A4000000000000000000902 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A4000000000000000000801 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A4000000000000000000301 /* UpscaleCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = UpscaleCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A4000000000000000000701 /* Project object */;
+}

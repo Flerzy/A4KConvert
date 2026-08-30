@@ -1,0 +1,39 @@
+Upscale
+=======
+
+This product includes third-party material, listed below with its licence.
+
+
+Anime4K
+-------
+https://github.com/bloc97/Anime4K
+Copyright (c) 2019-2021 bloc97 and contributors.
+
+The `.glsl` shader files in `Sources/UpscaleCore/Resources/Shaders/` are vendored
+unmodified from the Anime4K v4.0.1 release. Each file carries its own licence header:
+the CNN and Clamp_Highlights shaders are MIT-licensed, and the AutoDownscalePre
+shaders are released into the public domain under the Unlicense.
+
+The preset definitions in `Sources/UpscaleCore/Shaders/Preset.swift` reproduce the
+shader orderings published in Anime4K's `GLSL_Instructions.md`.
+
+
+Anime4KMetal
+------------
+https://github.com/imxieyi/Anime4KMetal
+Copyright 2021 Yi Xie.
+Licensed under the Apache License, Version 2.0.
+
+`Sources/UpscaleCore/Shaders/MSLTranslator.swift` is a port of Anime4KMetal's
+`Shared/MPVShader.swift` GLSL-to-Metal translation, and keeps its approach of turning
+mpv's implicit shader globals into explicit function parameters plus preprocessor
+macros. The Apache-2.0 licence text is reproduced in `LICENSES/Apache-2.0.txt`.
+
+
+mpv
+---
+https://github.com/mpv-player/mpv
+The user-shader directive semantics implemented in
+`Sources/UpscaleCore/Shaders/MPVShaderParser.swift` and the render graph in
+`Sources/UpscaleCore/Engine/` follow mpv's `video/out/gpu/user_shaders.c`.
+No mpv source code is included.
