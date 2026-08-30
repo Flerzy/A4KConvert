@@ -98,6 +98,15 @@ final class MatrixTests: XCTestCase {
             spec.colorRange = "tv"
         }
 
+        // A subtitle track with a long dialogue-free stretch. Without an explicit
+        // interleaving setting, ffmpeg gives up waiting for the sparse stream and
+        // flushes the whole audio track to the front of the file, so seeking past the
+        // first few megabytes finds no audio at all.
+        add("sparse subtitles") { spec in
+            spec.durationSeconds = 60
+            spec.subtitleGapSeconds = 55
+        }
+
         // Matroska carries font attachments for styled subtitles; they must survive.
         add("mkv attachments") { spec in
             spec.attachments = ["/System/Library/Fonts/Monaco.ttf"]
@@ -219,6 +228,19 @@ final class MatrixTests: XCTestCase {
                 "\(testCase.name) duration"
             )
 
+            // Audio has to stay interleaved with the video throughout the file, or a
+            // player that seeks lands in a region with no audio packets left.
+            if !source.audioStreams.isEmpty, (source.duration ?? 0) >= 10 {
+                let gap = try MatrixTests.audioVideoByteGap(
+                    tools: tools, url: output, at: (source.duration ?? 0) / 2
+                )
+                XCTAssertLessThan(
+                    gap, 1_000_000,
+                    "\(testCase.name): audio is \(gap) bytes away from the video at the "
+                        + "same timestamp; it is not interleaved"
+                )
+            }
+
             // A/V sync: the audio must not have drifted against the video.
             if !source.audioStreams.isEmpty {
                 let drift = try MatrixTests.audioVideoDrift(tools: tools, url: output)
@@ -278,6 +300,35 @@ final class MatrixTests: XCTestCase {
             return latest
         }
         return try endTime(of: "v:0") - endTime(of: "a:0")
+    }
+
+    /// How far apart in the file the audio and video packets for one timestamp sit.
+    ///
+    /// A correctly interleaved Matroska file keeps them within a cluster of each other.
+    private static func audioVideoByteGap(
+        tools: FFmpegTools, url: URL, at seconds: Double
+    ) throws -> Int {
+        func position(of specifier: String) throws -> Int? {
+            let result = try ProcessRunner.run(
+                executable: tools.ffprobe,
+                arguments: [
+                    "-v", "error",
+                    "-select_streams", specifier,
+                    "-read_intervals", "\(seconds)%+#3",
+                    "-show_entries", "packet=pos",
+                    "-of", "csv=p=0",
+                    url.path,
+                ]
+            )
+            for line in result.standardOutput.split(whereSeparator: \.isNewline) {
+                if let value = Int(line.trimmingCharacters(in: .whitespaces)) { return value }
+            }
+            return nil
+        }
+        guard let video = try position(of: "v:0"), let audio = try position(of: "a:0") else {
+            return 0
+        }
+        return abs(video - audio)
     }
 
     /// 10-bit input is refused rather than silently converted, in every container.

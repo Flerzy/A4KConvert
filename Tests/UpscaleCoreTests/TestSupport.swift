@@ -37,6 +37,9 @@ enum TestSupport {
         var container = "mkv"
         /// Font files to attach, exercising Matroska attachment passthrough.
         var attachments: [String] = []
+        /// When set, the subtitle track carries two events this many seconds apart,
+        /// reproducing the long dialogue-free stretches real subtitles have.
+        var subtitleGapSeconds: Double?
         /// Non-square pixels, e.g. `Rational(64, 45)` for 4:3 anamorphic PAL.
         var sampleAspectRatio: Rational?
         /// Colour tags to stamp on the source, for the colour round-trip checks.
@@ -97,7 +100,7 @@ enum TestSupport {
 
         if spec.includeSubtitles {
             let subtitles = directory.appendingPathComponent("\(name).srt")
-            try subtitleText(duration: spec.durationSeconds).write(
+            try subtitleText(duration: spec.durationSeconds, gap: spec.subtitleGapSeconds).write(
                 to: subtitles, atomically: true, encoding: .utf8
             )
             arguments += ["-i", subtitles.path]
@@ -149,12 +152,27 @@ enum TestSupport {
         return output
     }
 
-    private static func subtitleText(duration: Double) -> String {
-        let end = max(1.0, duration - 0.2)
+    private static func subtitleText(duration: Double, gap: Double?) -> String {
+        guard let gap else {
+            let end = max(1.0, duration - 0.2)
+            return """
+            1
+            00:00:00,100 --> \(timecode(end))
+            Upscale fixture subtitle
+
+            """
+        }
+        // Two events separated by a silent stretch, which is what pushes ffmpeg's
+        // interleaver past max_interleave_delta.
+        let secondStart = min(gap, max(0.5, duration - 1))
         return """
         1
-        00:00:00,100 --> \(timecode(end))
-        Upscale fixture subtitle
+        00:00:00,100 --> \(timecode(0.6))
+        first line
+
+        2
+        \(timecode(secondStart)) --> \(timecode(min(duration - 0.1, secondStart + 0.5)))
+        line after a long silence
 
         """
     }

@@ -139,6 +139,14 @@ public final class EncodeProcess {
         arguments += [
             "-map_metadata", "1",
             "-map_chapters", "1",
+            // Never give up waiting for a sparse stream. Subtitle tracks go quiet for
+            // minutes at a time, and past ffmpeg's default 10-second interleaving
+            // window the muxer stops waiting and flushes audio ahead of the video —
+            // on a feature-length file that puts the entire audio track in the first
+            // few megabytes, so seeking anywhere past it finds no audio at all.
+            // The cost is buffering until every stream has a packet: measured at
+            // 236 MB of ffmpeg memory for a four-minute dialogue gap at 4K.
+            "-max_interleave_delta", "0",
             "-vf", videoFilter(for: plan),
         ]
         arguments += plan.settings.arguments(for: plan.container)
