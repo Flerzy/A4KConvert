@@ -35,6 +35,8 @@ enum TestSupport {
         var audioTrackCount = 1
         var includeSubtitles = true
         var container = "mkv"
+        /// Font files to attach, exercising Matroska attachment passthrough.
+        var attachments: [String] = []
         /// Non-square pixels, e.g. `Rational(64, 45)` for 4:3 anamorphic PAL.
         var sampleAspectRatio: Rational?
         /// Colour tags to stamp on the source, for the colour round-trip checks.
@@ -127,6 +129,12 @@ enum TestSupport {
         if let primaries = spec.colorPrimaries { arguments += ["-color_primaries", primaries] }
         if let transfer = spec.colorTransfer { arguments += ["-color_trc", transfer] }
         if let range = spec.colorRange { arguments += ["-color_range", range] }
+        for attachment in spec.attachments {
+            arguments += ["-attach", attachment]
+        }
+        for index in spec.attachments.indices {
+            arguments += ["-metadata:s:t:\(index)", "mimetype=application/x-truetype-font"]
+        }
         arguments += spec.extraOutputArguments
         arguments.append(output.path)
 

@@ -29,13 +29,17 @@ public struct UpscaleJobSettings: Equatable, Sendable {
         container ?? OutputContainer.forURL(output.pathExtension.isEmpty ? input : output)
     }
 
-    /// A default destination beside the input, e.g. `episode.upscaled.mkv`.
+    /// A default destination beside the input, e.g. `episode.2x.mkv`.
+    ///
+    /// The extension comes from the container we will actually write, not from the
+    /// input's: anything that is not MP4/MOV is muxed as Matroska, so reusing an
+    /// `.avi` or `.ts` extension would name an MKV in a way players reject.
     public static func defaultOutputURL(for input: URL, scale: Int) -> URL {
         let base = input.deletingPathExtension().lastPathComponent
-        let ext = input.pathExtension.isEmpty ? "mkv" : input.pathExtension
+        let container = OutputContainer.forURL(input)
         return input
             .deletingLastPathComponent()
-            .appendingPathComponent("\(base).\(scale)x.\(ext)")
+            .appendingPathComponent("\(base).\(scale)x.\(container.fileExtension)")
     }
 }
 

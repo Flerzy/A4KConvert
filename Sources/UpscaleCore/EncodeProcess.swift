@@ -130,9 +130,7 @@ public final class EncodeProcess {
             arguments += ["-map", "1:a?", "-c:a", "copy"]
         }
 
-        if let subtitleCodec = subtitleCodec(for: media, container: plan.container) {
-            arguments += ["-map", "1:s?", "-c:s", subtitleCodec]
-        }
+        arguments += subtitleArguments(for: media, container: plan.container)
 
         if plan.container.supportsAttachments, !media.attachmentStreams.isEmpty {
             arguments += ["-map", "1:t?"]
@@ -152,18 +150,30 @@ public final class EncodeProcess {
         return arguments
     }
 
-    /// Picks one subtitle codec for the whole output, or nil to drop subtitles.
+    /// Maps the subtitle streams, with a codec per stream where they differ.
     ///
-    /// Mixed text and bitmap subtitles into MP4 would need per-stream codecs; v1
-    /// keeps them only when every subtitle stream can be carried.
-    static func subtitleCodec(for media: MediaInfo, container: OutputContainer) -> String? {
-        guard !media.subtitleStreams.isEmpty else { return nil }
-        var codecs: Set<String> = []
+    /// Subtitles are kept only when every stream can be carried: dropping some but not
+    /// others would quietly lose a track. Matroska legitimately needs two codecs at
+    /// once — `mov_text` has to become SubRip while everything else is copied — so the
+    /// codecs are spelled per stream rather than collapsed to one.
+    static func subtitleArguments(for media: MediaInfo, container: OutputContainer) -> [String] {
+        guard !media.subtitleStreams.isEmpty else { return [] }
+
+        var codecs: [String] = []
         for stream in media.subtitleStreams {
-            guard let codec = container.subtitleCodec(forSource: stream.codec) else { return nil }
-            codecs.insert(codec)
+            guard let codec = container.subtitleCodec(forSource: stream.codec) else { return [] }
+            codecs.append(codec)
         }
-        return codecs.count == 1 ? codecs.first : nil
+
+        var arguments = ["-map", "1:s?"]
+        if Set(codecs).count == 1 {
+            arguments += ["-c:s", codecs[0]]
+        } else {
+            for (index, codec) in codecs.enumerated() {
+                arguments += ["-c:s:\(index)", codec]
+            }
+        }
+        return arguments
     }
 
     static func videoFilter(for plan: EncodePlan) -> String {

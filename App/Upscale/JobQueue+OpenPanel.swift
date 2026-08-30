@@ -29,6 +29,21 @@ extension JobQueue {
         panel.message = "Choose where to write the upscaled file"
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // The save panel's overwrite prompt reads like any other replace, but writing
+        // over the source would truncate it before either ffmpeg could read it.
+        guard url.resolvingSymlinksInPath().standardizedFileURL
+            != job.input.resolvingSymlinksInPath().standardizedFileURL
+        else {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "That is the source file"
+            alert.informativeText = "Upscale reads the original while it writes, so the "
+                + "output has to be a different file. Choose another name."
+            alert.runModal()
+            return
+        }
+
         update(job.id) { $0.output = url }
     }
 

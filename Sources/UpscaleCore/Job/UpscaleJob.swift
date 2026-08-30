@@ -17,6 +17,9 @@ public final class UpscaleJob: @unchecked Sendable {
     /// slack only absorbs jitter in the pipes.
     public static let inFlightFrameLimit = 4
 
+    /// Minimum spacing between progress callbacks while frames are being written.
+    public static let progressInterval: TimeInterval = 0.1
+
     public let input: URL
     public let settings: UpscaleJobSettings
     private let tools: FFmpegTools
@@ -86,6 +89,15 @@ public final class UpscaleJob: @unchecked Sendable {
     public func run(progress: ((UpscaleProgress) -> Void)? = nil) throws -> MediaInfo {
         let start = Date()
         progress?(UpscaleProgress(phase: .probing))
+
+        // ffmpeg opens the source a second time for the audio/subtitle passthrough, and
+        // the encoder truncates its destination on open, so writing over the input
+        // would destroy it and then fail. Refuse before anything is opened.
+        guard settings.output.resolvingSymlinksInPath().standardizedFileURL
+            != input.resolvingSymlinksInPath().standardizedFileURL
+        else {
+            throw UpscaleError.outputWouldOverwriteInput(path: input.path)
+        }
 
         let media = try Probe(tools: tools).probe(url: input)
         if let reason = media.rejectionReason() {
@@ -211,8 +223,16 @@ public final class UpscaleJob: @unchecked Sendable {
             reader.close()
         }
 
-        func report() {
-            let elapsed = Date().timeIntervalSince(start)
+        // A 30-minute source is tens of thousands of frames; a progress bar cannot show
+        // more than a few updates a second, so coalesce them.
+        var lastReport = Date.distantPast
+        func report(force: Bool = false) {
+            let now = Date()
+            guard force || now.timeIntervalSince(lastReport) >= UpscaleJob.progressInterval else {
+                return
+            }
+            lastReport = now
+            let elapsed = now.timeIntervalSince(start)
             progress?(UpscaleProgress(
                 phase: .processing,
                 framesProcessed: writer.framesWritten,
@@ -284,6 +304,8 @@ public final class UpscaleJob: @unchecked Sendable {
             throw error
         }
 
+        // The throttle may have swallowed the last few frames' updates.
+        report(force: true)
         closePipes()
 
         progress?(UpscaleProgress(

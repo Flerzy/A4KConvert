@@ -98,6 +98,11 @@ final class MatrixTests: XCTestCase {
             spec.colorRange = "tv"
         }
 
+        // Matroska carries font attachments for styled subtitles; they must survive.
+        add("mkv attachments") { spec in
+            spec.attachments = ["/System/Library/Fonts/Monaco.ttf"]
+        }
+
         // Scale factors.
         add("4x", { _ in }, scale: 4)
         // Odd dimensions: 2x of an odd size is even, so this must simply work. 4:2:0
@@ -172,6 +177,12 @@ final class MatrixTests: XCTestCase {
             // Streams.
             XCTAssertEqual(
                 result.audioStreams.count, source.audioStreams.count, "\(testCase.name) audio count"
+            )
+            let container0 = OutputContainer.forExtension(outputExtension)
+            XCTAssertEqual(
+                result.attachmentStreams.count,
+                container0.supportsAttachments ? source.attachmentStreams.count : 0,
+                "\(testCase.name) attachment count"
             )
             let container = OutputContainer.forExtension(outputExtension)
             if !source.subtitleStreams.isEmpty {

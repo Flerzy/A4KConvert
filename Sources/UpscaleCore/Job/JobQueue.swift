@@ -63,7 +63,12 @@ public final class JobQueue: ObservableObject {
     private let catalog: ShaderCatalog
     private let workQueue = DispatchQueue(label: "upscale.job-queue", qos: .userInitiated)
     private var runningJob: UpscaleJob?
+    /// Ids of running jobs the user has cancelled, so their failure is labelled right.
     private var cancelledIDs: Set<UUID> = []
+    /// True between pressing Start and the queue genuinely running dry. Lets a job that
+    /// was still being probed when the queue drained pick up where it left off, without
+    /// ever starting work the user did not ask for.
+    private var wantsToRun = false
 
     public init(catalog: ShaderCatalog = ShaderCatalog()) {
         self.catalog = catalog
@@ -108,7 +113,12 @@ public final class JobQueue: ObservableObject {
     }
 
     private func applyProbe(_ result: Result<MediaInfo, Error>, to id: UUID) {
-        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        // The row may have been cancelled or removed while the probe was in flight;
+        // applying the result then would put a cancelled job back in the queue.
+        guard let index = jobs.firstIndex(where: { $0.id == id }),
+              jobs[index].state == .probing
+        else { return }
+
         switch result {
         case let .success(media):
             jobs[index].media = media
@@ -117,6 +127,10 @@ public final class JobQueue: ObservableObject {
                 jobs[index].failureMessage = reason
             } else {
                 jobs[index].state = .queued
+                // The queue may have run dry waiting for exactly this probe.
+                if wantsToRun, runningJob == nil {
+                    runNextJob()
+                }
             }
         case let .failure(error):
             jobs[index].state = .failed
@@ -147,6 +161,8 @@ public final class JobQueue: ObservableObject {
     public func retry(_ id: UUID) {
         guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].state.isTerminal
         else { return }
+        // Otherwise a stale cancellation would mislabel this run's outcome.
+        cancelledIDs.remove(id)
         jobs[index].state = .queued
         jobs[index].progress = nil
         jobs[index].failureMessage = nil
@@ -157,21 +173,30 @@ public final class JobQueue: ObservableObject {
 
     public func start() {
         guard canRun, !isRunning else { return }
+        wantsToRun = true
         runNextJob()
     }
 
     public func cancel(_ id: UUID) {
-        cancelledIDs.insert(id)
-        if let index = jobs.firstIndex(where: { $0.id == id }) {
-            if jobs[index].state == .running {
-                runningJob?.cancel()
-            } else if jobs[index].state == .queued || jobs[index].state == .probing {
-                jobs[index].state = .cancelled
-            }
+        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        switch jobs[index].state {
+        case .running:
+            // Only a running job reaches `finish`, so only its id needs remembering.
+            cancelledIDs.insert(id)
+            // Terminating walks a grace period waiting for ffmpeg to exit; doing that
+            // on the main actor would freeze the window for seconds. It cannot go on
+            // `workQueue` either — that is serial and currently busy with this job.
+            let job = runningJob
+            DispatchQueue.global(qos: .userInitiated).async { job?.cancel() }
+        case .queued, .probing:
+            jobs[index].state = .cancelled
+        case .finished, .failed, .cancelled:
+            break
         }
     }
 
     public func cancelAll() {
+        wantsToRun = false
         for job in jobs where !job.state.isTerminal {
             cancel(job.id)
         }
@@ -180,8 +205,15 @@ public final class JobQueue: ObservableObject {
     private func runNextJob() {
         guard let tools, let device else { return }
         guard let index = jobs.firstIndex(where: { $0.state == .queued }) else {
-            isRunning = false
             runningJob = nil
+            // Stay "running" while a probe is still outstanding: that job is about to
+            // become queued, and `applyProbe` will start it.
+            if wantsToRun, jobs.contains(where: { $0.state == .probing }) {
+                isRunning = true
+                return
+            }
+            wantsToRun = false
+            isRunning = false
             return
         }
 

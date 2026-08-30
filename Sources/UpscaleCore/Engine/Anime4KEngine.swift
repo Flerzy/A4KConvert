@@ -45,10 +45,15 @@ public final class Anime4KEngine {
             inputSize: inputSize,
             targetSize: targetSize
         )
-        self.plan = plan
-        self.pipelines = try compilePipelines(for: plan)
-        self.resolvePipeline = try makeResolvePipeline()
+        // Everything that can throw runs first: `plan` is only published once the
+        // pipelines that match it exist, so `encode` can never index a stale array.
+        let pipelines = try compilePipelines(for: plan)
+        let resolvePipeline = try makeResolvePipeline()
+
+        self.pipelines = pipelines
+        self.resolvePipeline = resolvePipeline
         self.lanczos = plan.producesTargetSize ? nil : MPSImageLanczosScale(device: device)
+        self.plan = plan
         pool.removeAll()
     }
 

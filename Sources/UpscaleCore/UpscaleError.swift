@@ -18,6 +18,8 @@ public enum UpscaleError: Error, CustomStringConvertible {
     case noVideoStream(path: String)
     /// The input uses a feature that v1 deliberately refuses (10-bit, HDR, …).
     case unsupportedInput(reason: String)
+    /// The destination is the source file, which encoding would destroy.
+    case outputWouldOverwriteInput(path: String)
 
     public var description: String {
         switch self {
@@ -37,6 +39,8 @@ public enum UpscaleError: Error, CustomStringConvertible {
             return "No video stream found in \(path)."
         case let .unsupportedInput(reason):
             return "Unsupported input: \(reason)"
+        case let .outputWouldOverwriteInput(path):
+            return "The destination is the source file (\(path)). Choose a different name."
         }
     }
 
