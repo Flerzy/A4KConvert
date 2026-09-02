@@ -113,6 +113,8 @@ private struct Toolbar: View {
                 Button("Default Output Folder…") { queue.presentDefaultFolderPanel() }
                 Button("Reset to Beside Input") { queue.defaults.outputFolder = nil }
                     .disabled(queue.defaults.outputFolder == nil)
+                Divider()
+                Toggle("Skip Openings and Endings", isOn: autoSkipBinding)
             } label: {
                 Text(outputFolderLabel)
             }
@@ -128,6 +130,13 @@ private struct Toolbar: View {
                 .disabled(queue.isRunning || !queue.canRun || !queue.jobs.contains { $0.state == .queued })
         }
         .padding(10)
+    }
+
+    private var autoSkipBinding: Binding<Bool> {
+        Binding(
+            get: { queue.defaults.autoSkipChapters },
+            set: { queue.defaults.autoSkipChapters = $0 }
+        )
     }
 
     private var outputFolderLabel: String {

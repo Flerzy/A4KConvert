@@ -100,6 +100,19 @@ public struct VideoStream: Equatable, Sendable {
     }
 }
 
+/// A container chapter, as ffprobe reports it.
+public struct Chapter: Equatable, Sendable {
+    public let start: Double
+    public let end: Double
+    public let title: String?
+
+    public init(start: Double, end: Double, title: String?) {
+        self.start = start
+        self.end = end
+        self.title = title
+    }
+}
+
 /// Everything the pipeline needs to know about an input file.
 public struct MediaInfo: Equatable, Sendable {
     public let path: String
@@ -110,6 +123,7 @@ public struct MediaInfo: Equatable, Sendable {
     public let audioStreams: [MediaStream]
     public let subtitleStreams: [MediaStream]
     public let attachmentStreams: [MediaStream]
+    public let chapters: [Chapter]
 
     public init(
         path: String,
@@ -118,7 +132,8 @@ public struct MediaInfo: Equatable, Sendable {
         video: VideoStream,
         audioStreams: [MediaStream],
         subtitleStreams: [MediaStream],
-        attachmentStreams: [MediaStream]
+        attachmentStreams: [MediaStream],
+        chapters: [Chapter] = []
     ) {
         self.path = path
         self.formatName = formatName
@@ -127,6 +142,7 @@ public struct MediaInfo: Equatable, Sendable {
         self.audioStreams = audioStreams
         self.subtitleStreams = subtitleStreams
         self.attachmentStreams = attachmentStreams
+        self.chapters = chapters
     }
 
     /// Best available frame count: the container's own number when it has one,

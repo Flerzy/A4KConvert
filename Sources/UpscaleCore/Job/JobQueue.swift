@@ -23,6 +23,9 @@ public struct QueuedJob: Identifiable, Equatable {
     public let input: URL
     public var media: MediaInfo?
     public var settings: UpscaleJobSettings
+    /// Ranges the chapter detector proposed. Listed in the row whether or not they are
+    /// checked, so the user can toggle one back on without retyping its times.
+    public var detectedSkipRanges: [SkipRange] = []
     public var state: State
     public var progress: UpscaleProgress?
     /// One-line reason, suitable for the row.
@@ -45,6 +48,30 @@ public struct QueuedJob: Identifiable, Equatable {
         let width = media.video.width * settings.scale
         let height = media.video.height * settings.scale
         return "\(media.video.width)x\(media.video.height) → \(width)x\(height)"
+    }
+
+    /// e.g. "Skipping 2 segments (3:00.0)"; nil when nothing is skipped.
+    public var skipSummary: String? {
+        let ranges = SkipRanges.normalized(settings.skipRanges, duration: media?.duration)
+        guard !ranges.isEmpty else { return nil }
+        let total = Timecode.format(SkipRanges.totalDuration(ranges))
+        return ranges.count == 1
+            ? "Skipping 1 segment (\(total))"
+            : "Skipping \(ranges.count) segments (\(total))"
+    }
+
+    /// Every range the row can show: the detected ones plus any the user typed.
+    public var allSkipRanges: [SkipRange] {
+        var ranges = detectedSkipRanges
+        for chosen in settings.skipRanges
+        where !ranges.contains(where: { $0.coversSameTime(as: chosen) }) {
+            ranges.append(chosen)
+        }
+        return ranges.sorted { $0.start < $1.start }
+    }
+
+    public func isSkipRangeEnabled(_ range: SkipRange) -> Bool {
+        settings.skipRanges.contains { $0.coversSameTime(as: range) }
     }
 }
 
@@ -120,6 +147,11 @@ public final class JobQueue: ObservableObject {
         switch result {
         case let .success(media):
             jobs[index].media = media
+            let detected = ChapterSkipDetector.skippableRanges(in: media)
+            jobs[index].detectedSkipRanges = detected
+            if defaults.autoSkipChapters {
+                jobs[index].settings.skipRanges = detected
+            }
             if let reason = media.rejectionReason() {
                 jobs[index].state = .failed
                 jobs[index].failureMessage = reason
@@ -170,6 +202,28 @@ public final class JobQueue: ObservableObject {
             jobs[index].settings.output = JobDefaults.outputURL(
                 for: jobs[index].input, scale: source.scale, in: folder
             )
+        }
+    }
+
+    /// Copies one row's checked skip ranges onto every other queued row.
+    ///
+    /// Separate from `applyToAllQueued` because it only makes sense across episodes of
+    /// the same show, where the OP and ED sit at the same timestamps.
+    public func copySkipRangesToAllQueued(from id: UUID) {
+        guard let ranges = jobs.first(where: { $0.id == id })?.settings.skipRanges else { return }
+        for index in jobs.indices where jobs[index].state == .queued && jobs[index].id != id {
+            jobs[index].settings.skipRanges = ranges
+        }
+    }
+
+    /// Adds a range the user typed, or removes the one covering the same time.
+    public func setSkipRange(_ range: SkipRange, enabled: Bool, for id: UUID) {
+        update(id) { settings in
+            settings.skipRanges.removeAll { $0.coversSameTime(as: range) }
+            if enabled {
+                settings.skipRanges.append(range)
+                settings.skipRanges.sort { $0.start < $1.start }
+            }
         }
     }
 

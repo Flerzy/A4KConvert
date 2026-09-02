@@ -64,6 +64,37 @@ On a queued row:
 6. Choose **Reset to Beside Input** in the same menu; a newly added file goes back to
    writing next to its source. Relaunching keeps whichever of the two was last chosen.
 
+## 2c. Skip segments
+
+Make a file with chapters:
+
+```sh
+printf ';FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=90000\ntitle=OP\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=90000\nEND=1200000\ntitle=Part A\n' > chapters.txt
+ffmpeg -i sample.mkv -i chapters.txt -map_metadata 1 -map_chapters 1 -c copy chapters.mkv
+```
+
+1. With **Skip Openings and Endings** on in the toolbar's output menu, add
+   `chapters.mkv`. The row summary reads "Skipping 1 segment (1:30.0)" and the
+   **Skip segments** disclosure lists `OP  0:00.0 – 1:30.0` checked and no `Part A`.
+2. Untick `OP`; the summary disappears. Tick it again.
+3. Type `0:05` and `0:10` into the two fields and press **Add Range**. A "Manual" row
+   appears, checked, and the summary counts two segments. A malformed time shows
+   "Use ss, m:ss or h:mm:ss." and adds nothing.
+4. Add a second file and press **Copy to All Queued**; the other row gets the same
+   ranges.
+5. Run the job. The output has the same duration and frame count as the source:
+
+   ```sh
+   ffprobe -v error -count_frames -select_streams v:0 \
+           -show_entries stream=nb_read_frames -of csv=p=0 chapters.mkv out.mkv
+   ffprobe -v error -show_chapters out.mkv
+   ```
+
+   The chapters survive, and stepping through the skipped stretch in mpv shows a plain
+   resample — softer than the upscaled part, never a freeze or a black frame.
+6. Turn **Skip Openings and Endings** off, add the file again: the `OP` range is listed
+   but unchecked.
+
 ## 3. Running and cancelling
 
 1. Click **Start**. The row goes to **Running**.

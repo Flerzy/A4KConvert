@@ -66,6 +66,9 @@ absolute difference of about 0.01/255 — see `Anime4KEngineTests`.
   than silently producing wrong colours.
 - Preset, scale, encoder, quality and an optional output folder are remembered between
   launches, and one row's settings can be pushed onto every other queued row.
+- Skip segments: time ranges — detected from opening/ending chapters or typed by hand —
+  bypass the Anime4K chain and are resampled with Lanczos instead. The output keeps its
+  full length, audio sync, subtitles and chapters; nothing is cut.
 
 ## Licences
 

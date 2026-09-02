@@ -73,6 +73,85 @@ final class UpscaleJobTests: XCTestCase {
         XCTAssertTrue(decoded.standardError.isEmpty, decoded.standardError)
     }
 
+    /// A skipped segment still produces frames: the output keeps its length, its
+    /// chapters and its frame count, and only the shader chain is bypassed.
+    func testSkippedSegmentIsPassedThrough() throws {
+        let (tools, device) = try requireEnvironment()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var spec = TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 10.0)
+        spec.chapters = [
+            (title: "OP", start: 0, end: 3),
+            (title: "Part A", start: 3, end: 7),
+            (title: "ED", start: 7, end: 10),
+        ]
+        let fixture = try TestSupport.makeFixture(spec, in: directory)
+
+        let media = try Probe(tools: tools).probe(url: fixture)
+        XCTAssertEqual(media.chapters.count, 3)
+        let skipRanges = ChapterSkipDetector.skippableRanges(in: media)
+        XCTAssertEqual(skipRanges.map(\.label), ["OP", "ED"])
+
+        let output = directory.appendingPathComponent("upscaled.mkv")
+        let job = UpscaleJob(
+            input: fixture,
+            settings: UpscaleJobSettings(
+                preset: try XCTUnwrap(Preset.preset(id: "mode-a-fast")),
+                scale: 2,
+                skipRanges: skipRanges,
+                output: output
+            ),
+            tools: tools,
+            device: device
+        )
+
+        var lastProgress: UpscaleProgress?
+        let source = try job.run { lastProgress = $0 }
+        let progress = try XCTUnwrap(lastProgress)
+
+        let sourceFrames = try frameCount(of: fixture, tools: tools)
+        let outputFrames = try frameCount(of: output, tools: tools)
+        XCTAssertEqual(outputFrames, sourceFrames)
+
+        // Frames the plan marks inside the frames that actually exist: the last range
+        // ends at the file's own end, where the source may be a frame short of the
+        // nominal count.
+        let plan = SkipPlan(ranges: skipRanges, frameRate: media.video.realFrameRate)
+        let expected = (0..<sourceFrames).filter { plan.isSkipped(frame: $0) }.count
+        XCTAssertEqual(progress.framesPassedThrough, expected)
+        XCTAssertGreaterThan(expected, 0)
+        XCTAssertLessThan(expected, sourceFrames)
+        XCTAssertLessThanOrEqual(plan.skippedFrameCount - expected, 1)
+
+        let result = try Probe(tools: tools).probe(url: output)
+        XCTAssertEqual(result.video.width, source.video.width * 2)
+        XCTAssertEqual(result.video.height, source.video.height * 2)
+        XCTAssertEqual(result.chapters.count, 3)
+        XCTAssertEqual(result.chapters.map(\.title), ["OP", "Part A", "ED"])
+
+        let sourceDuration = try XCTUnwrap(source.duration)
+        let outputDuration = try XCTUnwrap(result.duration)
+        let frameDuration = 1.0 / source.video.realFrameRate.doubleValue
+        XCTAssertEqual(outputDuration, sourceDuration, accuracy: frameDuration * 1.5)
+    }
+
+    /// Decoded frame count, which Matroska does not store in its header.
+    private func frameCount(of url: URL, tools: FFmpegTools) throws -> Int {
+        let result = try ProcessRunner.run(
+            executable: tools.ffprobe,
+            arguments: [
+                "-v", "error", "-count_frames", "-select_streams", "v:0",
+                "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", url.path,
+            ]
+        )
+        let text = result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let count = Int(text) else {
+            throw XCTSkip("ffprobe could not count frames: \(text) \(result.standardError)")
+        }
+        return count
+    }
+
     func testTenBitInputIsRefusedBeforeAnythingIsWritten() throws {
         let (tools, device) = try requireEnvironment()
         let directory = try TestSupport.makeTemporaryDirectory()

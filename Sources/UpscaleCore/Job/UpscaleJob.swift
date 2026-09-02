@@ -145,12 +145,19 @@ public final class UpscaleJob: @unchecked Sendable {
         self.encode = encode
         cancelLock.unlock()
 
+        // Frame timestamps come from the forced constant rate, not from the container.
+        let skipPlan = SkipPlan(
+            ranges: SkipRanges.normalized(settings.skipRanges, duration: media.duration),
+            frameRate: media.video.realFrameRate
+        )
+
         do {
             try runPipeline(
                 media: media,
                 decode: decode,
                 encode: encode,
                 engine: engine,
+                skipPlan: skipPlan,
                 commandQueue: commandQueue,
                 inputSize: inputSize,
                 targetSize: targetSize,
@@ -179,6 +186,7 @@ public final class UpscaleJob: @unchecked Sendable {
         decode: DecodeProcess,
         encode: EncodeProcess,
         engine: Anime4KEngine,
+        skipPlan: SkipPlan,
         commandQueue: MTLCommandQueue,
         inputSize: PixelSize,
         targetSize: PixelSize,
@@ -213,6 +221,7 @@ public final class UpscaleJob: @unchecked Sendable {
         var inFlight: [InFlightFrame] = []
         var reachedEndOfStream = false
         var closedPipes = false
+        var framesPassedThrough = 0
         let totalFrames = media.estimatedFrameCount
 
         /// Closes our ends of both pipes exactly once.
@@ -238,7 +247,8 @@ public final class UpscaleJob: @unchecked Sendable {
                 framesProcessed: writer.framesWritten,
                 totalFrames: totalFrames,
                 framesPerSecond: elapsed > 0 ? Double(writer.framesWritten) / elapsed : 0,
-                elapsed: elapsed
+                elapsed: elapsed,
+                framesPassedThrough: framesPassedThrough
             ))
         }
 
@@ -249,6 +259,9 @@ public final class UpscaleJob: @unchecked Sendable {
             // Fill the pipeline: reading and uploading frame N+1 overlaps the GPU work
             // still running for the frames already committed.
             while !reachedEndOfStream, inFlight.count < UpscaleJob.inFlightFrameLimit {
+                // The decode side is constant frame rate, so the count of frames read so
+                // far is the index of the one about to be read.
+                let frameIndex = reader.framesRead
                 guard let frame = try reader.readFrame() else {
                     reachedEndOfStream = true
                     break
@@ -265,11 +278,20 @@ public final class UpscaleJob: @unchecked Sendable {
                 guard let commandBuffer = commandQueue.makeCommandBuffer() else {
                     throw EngineError.noMetalDevice
                 }
-                try engine.encode(
-                    commandBuffer: commandBuffer,
-                    input: inputTexture,
-                    output: outputTexture
-                )
+                if skipPlan.isSkipped(frame: frameIndex) {
+                    try engine.encodePassthrough(
+                        commandBuffer: commandBuffer,
+                        input: inputTexture,
+                        output: outputTexture
+                    )
+                    framesPassedThrough += 1
+                } else {
+                    try engine.encode(
+                        commandBuffer: commandBuffer,
+                        input: inputTexture,
+                        output: outputTexture
+                    )
+                }
                 commandBuffer.commit()
                 inFlight.append(
                     InFlightFrame(
@@ -312,7 +334,8 @@ public final class UpscaleJob: @unchecked Sendable {
             phase: .finalizing,
             framesProcessed: writer.framesWritten,
             totalFrames: totalFrames,
-            elapsed: Date().timeIntervalSince(start)
+            elapsed: Date().timeIntervalSince(start),
+            framesPassedThrough: framesPassedThrough
         ))
 
         try decode.waitAndCheck()

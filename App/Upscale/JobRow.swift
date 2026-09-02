@@ -13,6 +13,7 @@ struct JobRow: View {
             header
             if job.state == .queued || job.state == .probing {
                 settings
+                SkipSegmentsSection(job: job)
             }
             if job.state == .running, let progress = job.progress {
                 ProgressSection(progress: progress)
@@ -39,6 +40,9 @@ struct JobRow: View {
                     }
                     if let media = job.media, let duration = media.duration {
                         Text(JobRow.durationText(duration))
+                    }
+                    if let skips = job.skipSummary {
+                        Text(skips)
                     }
                 }
                 .font(.caption)
@@ -203,6 +207,81 @@ struct JobRow: View {
         return hours > 0
             ? String(format: "%d:%02d:%02d", hours, mins, secs)
             : String(format: "%d:%02d", mins, secs)
+    }
+}
+
+/// The skip-segment list: chapter-detected ranges to tick, plus ranges typed by hand.
+private struct SkipSegmentsSection: View {
+    @EnvironmentObject private var queue: JobQueue
+    let job: QueuedJob
+    @State private var isExpanded = false
+    @State private var startText = ""
+    @State private var endText = ""
+    @State private var addError: String?
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 4) {
+                if job.allSkipRanges.isEmpty {
+                    Text("No chapters looked like an opening or ending. Add a range below.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(job.allSkipRanges, id: \.self) { range in
+                    HStack(spacing: 6) {
+                        Toggle(isOn: binding(for: range)) {
+                            Text(range.label ?? "Manual")
+                                .frame(width: 140, alignment: .leading)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        Text("\(Timecode.format(range.start)) – \(Timecode.format(range.end))")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    TextField("0:00", text: $startText).frame(width: 70)
+                    Text("–")
+                    TextField("1:30", text: $endText).frame(width: 70)
+                    Button("Add Range") { addRange() }
+                    Button("Copy to All Queued") { queue.copySkipRangesToAllQueued(from: job.id) }
+                        .disabled(job.settings.skipRanges.isEmpty)
+                }
+                if let addError {
+                    Text(addError).foregroundStyle(.red)
+                }
+            }
+            .padding(.top, 4)
+            .font(.caption)
+        } label: {
+            Text(job.skipSummary ?? "Skip segments")
+                .font(.caption)
+        }
+        .disabled(job.state == .probing)
+        .controlSize(.small)
+    }
+
+    private func binding(for range: SkipRange) -> Binding<Bool> {
+        Binding(
+            get: { job.isSkipRangeEnabled(range) },
+            set: { queue.setSkipRange(range, enabled: $0, for: job.id) }
+        )
+    }
+
+    private func addRange() {
+        guard let start = Timecode.parse(startText), let end = Timecode.parse(endText) else {
+            addError = "Use ss, m:ss or h:mm:ss."
+            return
+        }
+        guard end > start else {
+            addError = "The end has to come after the start."
+            return
+        }
+        addError = nil
+        queue.setSkipRange(SkipRange(start: start, end: end), enabled: true, for: job.id)
+        startText = ""
+        endText = ""
     }
 }
 

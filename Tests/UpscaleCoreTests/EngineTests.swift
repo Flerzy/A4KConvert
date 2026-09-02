@@ -1,4 +1,5 @@
 import Metal
+import MetalPerformanceShaders
 import XCTest
 @testable import UpscaleCore
 
@@ -176,6 +177,35 @@ final class Anime4KEngineTests: XCTestCase {
         XCTAssertEqual(engine.textureAllocationCount, afterFirstFrame)
     }
 
+    /// The skip path must be a plain Lanczos resample and nothing else: same result as
+    /// MPS on its own, and clearly different from the shader chain.
+    func testPassthroughIsALanczosResampleAndNotTheChain() throws {
+        let device = try requireDevice()
+        let source = try ImageFixture.load(named: "anime4k_source_640x480")
+        let targetSize = PixelSize(width: 1280, height: 960)
+        let engine = try Anime4KEngine(
+            preset: try XCTUnwrap(Preset.preset(id: "mode-a-fast")),
+            device: device
+        )
+        try engine.configure(
+            inputSize: PixelSize(width: source.width, height: source.height),
+            targetSize: targetSize
+        )
+
+        let passthrough = try run(
+            engine: engine, device: device, source: source, targetSize: targetSize,
+            reconfigure: false, passthrough: true
+        )
+        let reference = try lanczos(source: source, targetSize: targetSize, device: device)
+        XCTAssertLessThan(try passthrough.meanAbsoluteDifference(to: reference), 1.0 / 255.0)
+
+        let upscaled = try run(
+            engine: engine, device: device, source: source, targetSize: targetSize,
+            reconfigure: false
+        )
+        XCTAssertGreaterThan(try passthrough.meanAbsoluteDifference(to: upscaled), 2.0 / 255.0)
+    }
+
     func testWrongInputSizeIsRejected() throws {
         let device = try requireDevice()
         let engine = try Anime4KEngine(preset: Preset.all[0], device: device)
@@ -203,7 +233,8 @@ final class Anime4KEngineTests: XCTestCase {
         device: MTLDevice,
         source: ImageFixture,
         targetSize: PixelSize,
-        reconfigure: Bool = true
+        reconfigure: Bool = true,
+        passthrough: Bool = false
     ) throws -> ImageFixture {
         if reconfigure {
             try engine.configure(
@@ -221,13 +252,45 @@ final class Anime4KEngineTests: XCTestCase {
         )
 
         let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
-        try engine.encode(commandBuffer: commandBuffer, input: input, output: output)
+        if passthrough {
+            try engine.encodePassthrough(commandBuffer: commandBuffer, input: input, output: output)
+        } else {
+            try engine.encode(commandBuffer: commandBuffer, input: input, output: output)
+        }
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
         if let error = commandBuffer.error {
             throw error
         }
 
+        return ImageFixture(
+            width: targetSize.width,
+            height: targetSize.height,
+            bgra: FrameTextures.readback(from: output)
+        )
+    }
+
+    /// MPS Lanczos on its own, as the reference the passthrough path has to match.
+    private func lanczos(
+        source: ImageFixture,
+        targetSize: PixelSize,
+        device: MTLDevice
+    ) throws -> ImageFixture {
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let input = try FrameTextures.makeTexture(
+            device: device, width: source.width, height: source.height
+        )
+        try FrameTextures.upload(source.bgra, to: input)
+        let output = try FrameTextures.makeTexture(
+            device: device, width: targetSize.width, height: targetSize.height
+        )
+        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+        MPSImageLanczosScale(device: device).encode(
+            commandBuffer: commandBuffer, sourceTexture: input, destinationTexture: output
+        )
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        if let error = commandBuffer.error { throw error }
         return ImageFixture(
             width: targetSize.width,
             height: targetSize.height,

@@ -18,6 +18,7 @@ public struct Probe {
             "-print_format", "json",
             "-show_streams",
             "-show_format",
+            "-show_chapters",
             url.path,
         ]
     }
@@ -91,6 +92,11 @@ public struct Probe {
                 }
         }
 
+        let chapters: [Chapter] = (output.chapters ?? []).compactMap { raw in
+            guard let start = raw.startTime, let end = raw.endTime, end > start else { return nil }
+            return Chapter(start: start, end: end, title: raw.title)
+        }
+
         return MediaInfo(
             path: path,
             formatName: output.format?.formatName ?? "",
@@ -98,7 +104,8 @@ public struct Probe {
             video: video,
             audioStreams: streams(of: .audio),
             subtitleStreams: streams(of: .subtitle),
-            attachmentStreams: streams(of: .attachment)
+            attachmentStreams: streams(of: .attachment),
+            chapters: chapters
         )
     }
 }

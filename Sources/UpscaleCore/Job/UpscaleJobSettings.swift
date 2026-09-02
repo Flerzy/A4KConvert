@@ -9,6 +9,9 @@ public struct UpscaleJobSettings: Equatable, Sendable {
     public var encoder: EncoderSettings
     /// The output container. `nil` keeps the input's own container.
     public var container: OutputContainer?
+    /// Source time ranges that skip the Anime4K chain; they are still resampled and
+    /// encoded, so the output keeps its length.
+    public var skipRanges: [SkipRange]
     public var output: URL
 
     public init(
@@ -16,12 +19,14 @@ public struct UpscaleJobSettings: Equatable, Sendable {
         scale: Int = 2,
         encoder: EncoderSettings = EncoderSettings(),
         container: OutputContainer? = nil,
+        skipRanges: [SkipRange] = [],
         output: URL
     ) {
         self.preset = preset
         self.scale = scale
         self.encoder = encoder
         self.container = container
+        self.skipRanges = skipRanges
         self.output = output
     }
 
@@ -61,19 +66,23 @@ public struct UpscaleProgress: Equatable, Sendable {
     public var totalFrames: Int?
     public var framesPerSecond: Double
     public var elapsed: TimeInterval
+    /// How many of `framesProcessed` bypassed the Anime4K chain.
+    public var framesPassedThrough: Int
 
     public init(
         phase: UpscaleJobPhase,
         framesProcessed: Int = 0,
         totalFrames: Int? = nil,
         framesPerSecond: Double = 0,
-        elapsed: TimeInterval = 0
+        elapsed: TimeInterval = 0,
+        framesPassedThrough: Int = 0
     ) {
         self.phase = phase
         self.framesProcessed = framesProcessed
         self.totalFrames = totalFrames
         self.framesPerSecond = framesPerSecond
         self.elapsed = elapsed
+        self.framesPassedThrough = framesPassedThrough
     }
 
     public var fractionCompleted: Double? {

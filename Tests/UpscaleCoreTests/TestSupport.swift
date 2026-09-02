@@ -47,6 +47,8 @@ enum TestSupport {
         var colorPrimaries: String?
         var colorTransfer: String?
         var colorRange: String?
+        /// Chapters to mux in, e.g. `[("OP", 0, 3)]`, for the skip-range detector.
+        var chapters: [(title: String, start: Double, end: Double)] = []
         var extraOutputArguments: [String] = []
     }
 
@@ -111,6 +113,18 @@ enum TestSupport {
             nextInput += 1
         }
 
+        if !spec.chapters.isEmpty {
+            // Chapters only reach the muxer through an ffmetadata input, which has to be
+            // named explicitly by -map_chapters as well as -map_metadata.
+            let metadata = directory.appendingPathComponent("\(name).ffmetadata")
+            try chapterMetadata(spec.chapters).write(
+                to: metadata, atomically: true, encoding: .utf8
+            )
+            arguments += ["-i", metadata.path]
+            codecArguments += ["-map_metadata", "\(nextInput)", "-map_chapters", "\(nextInput)"]
+            nextInput += 1
+        }
+
         arguments += mapArguments
         arguments += ["-t", String(spec.durationSeconds)]
         arguments += codecArguments
@@ -150,6 +164,23 @@ enum TestSupport {
             )
         }
         return output
+    }
+
+    private static func chapterMetadata(
+        _ chapters: [(title: String, start: Double, end: Double)]
+    ) -> String {
+        var text = ";FFMETADATA1\n"
+        for chapter in chapters {
+            text += """
+            [CHAPTER]
+            TIMEBASE=1/1000
+            START=\(Int((chapter.start * 1000).rounded()))
+            END=\(Int((chapter.end * 1000).rounded()))
+            title=\(chapter.title)
+
+            """
+        }
+        return text
     }
 
     private static func subtitleText(duration: Double, gap: Double?) -> String {

@@ -110,6 +110,57 @@ final class ProbeParsingTests: XCTestCase {
         }
     }
 
+    func testChaptersAreDecoded() throws {
+        let json = """
+        {
+          "streams": [{
+            "index": 0, "codec_name": "h264", "codec_type": "video",
+            "width": 640, "height": 480, "pix_fmt": "yuv420p",
+            "r_frame_rate": "25/1", "avg_frame_rate": "25/1"
+          }],
+          "chapters": [
+            {
+              "id": 0, "time_base": "1/1000", "start": 0, "start_time": "0.000000",
+              "end": 3000, "end_time": "3.000000", "tags": {"title": "OP"}
+            },
+            {
+              "id": 1, "time_base": "1/1000", "start": 3000, "start_time": "3.000000",
+              "end": 10000, "end_time": "10.000000", "tags": {"title": "Part A"}
+            }
+          ],
+          "format": {"format_name": "matroska,webm", "duration": "10.000"}
+        }
+        """.data(using: .utf8)!
+
+        let info = try Probe.parse(json: json, path: "chapters.mkv")
+        XCTAssertEqual(
+            info.chapters,
+            [
+                Chapter(start: 0, end: 3, title: "OP"),
+                Chapter(start: 3, end: 10, title: "Part A"),
+            ]
+        )
+        XCTAssertEqual(
+            ChapterSkipDetector.skippableRanges(in: info),
+            [SkipRange(start: 0, end: 3, label: "OP")]
+        )
+    }
+
+    /// Every file that has no chapters has to parse just as before.
+    func testMissingChaptersKeyIsNotAnError() throws {
+        let json = """
+        {
+          "streams": [{
+            "index": 0, "codec_name": "h264", "codec_type": "video",
+            "width": 640, "height": 480, "pix_fmt": "yuv420p",
+            "r_frame_rate": "25/1", "avg_frame_rate": "25/1"
+          }],
+          "format": {"format_name": "matroska,webm", "duration": "10.000"}
+        }
+        """.data(using: .utf8)!
+        XCTAssertEqual(try Probe.parse(json: json, path: "plain.mkv").chapters, [])
+    }
+
     func testMalformedJSONIsReported() {
         XCTAssertThrowsError(try Probe.parse(json: Data("not json".utf8), path: "x")) { error in
             guard case UpscaleError.probeFailed = error else {

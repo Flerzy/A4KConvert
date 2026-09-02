@@ -16,6 +16,9 @@ public final class Anime4KEngine {
     private var pipelines: [MTLComputePipelineState] = []
     private var resolvePipeline: MTLComputePipelineState?
     private var lanczos: MPSImageLanczosScale?
+    /// Kept separate from `lanczos` so the skip path exists even when the chain lands
+    /// on the target size by itself.
+    private var passthroughScaler: MPSImageLanczosScale?
 
     public init(
         preset: Preset,
@@ -53,6 +56,7 @@ public final class Anime4KEngine {
         self.pipelines = pipelines
         self.resolvePipeline = resolvePipeline
         self.lanczos = plan.producesTargetSize ? nil : MPSImageLanczosScale(device: device)
+        self.passthroughScaler = MPSImageLanczosScale(device: device)
         self.plan = plan
         pool.removeAll()
     }
@@ -122,18 +126,7 @@ public final class Anime4KEngine {
         output: MTLTexture
     ) throws {
         guard let plan, let resolvePipeline else { throw EngineError.notConfigured }
-        guard input.width == plan.inputSize.width, input.height == plan.inputSize.height else {
-            throw EngineError.sizeMismatch(
-                expected: plan.inputSize.description,
-                got: "\(input.width)x\(input.height)"
-            )
-        }
-        guard output.width == plan.targetSize.width, output.height == plan.targetSize.height else {
-            throw EngineError.sizeMismatch(
-                expected: plan.targetSize.description,
-                got: "\(output.width)x\(output.height)"
-            )
-        }
+        try checkSizes(plan: plan, input: input, output: output)
 
         let allocator = FrameAllocator(pool: pool)
         var textures = [MTLTexture?](repeating: nil, count: plan.slotSizes.count)
@@ -194,6 +187,39 @@ public final class Anime4KEngine {
 
         commandBuffer.addCompletedHandler { _ in
             allocator.returnAllToPool()
+        }
+    }
+
+    /// Resamples the frame straight to the target size with Lanczos, bypassing every
+    /// shader pass. Same texture contract as `encode`; used for skipped segments.
+    ///
+    /// This is a pure resample of the RGB frame: it deliberately does not touch the
+    /// pipe format, so a later move to YUV pipes only has to run it between the two
+    /// colour conversions.
+    public func encodePassthrough(
+        commandBuffer: MTLCommandBuffer,
+        input: MTLTexture,
+        output: MTLTexture
+    ) throws {
+        guard let plan, let passthroughScaler else { throw EngineError.notConfigured }
+        try checkSizes(plan: plan, input: input, output: output)
+        passthroughScaler.encode(
+            commandBuffer: commandBuffer, sourceTexture: input, destinationTexture: output
+        )
+    }
+
+    private func checkSizes(plan: RenderPlan, input: MTLTexture, output: MTLTexture) throws {
+        guard input.width == plan.inputSize.width, input.height == plan.inputSize.height else {
+            throw EngineError.sizeMismatch(
+                expected: plan.inputSize.description,
+                got: "\(input.width)x\(input.height)"
+            )
+        }
+        guard output.width == plan.targetSize.width, output.height == plan.targetSize.height else {
+            throw EngineError.sizeMismatch(
+                expected: plan.targetSize.description,
+                got: "\(output.width)x\(output.height)"
+            )
         }
     }
 

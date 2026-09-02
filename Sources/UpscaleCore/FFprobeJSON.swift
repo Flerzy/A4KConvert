@@ -45,10 +45,33 @@ extension KeyedDecodingContainer {
     }
 }
 
-/// The subset of `ffprobe -show_streams -show_format` output we consume.
+/// The subset of `ffprobe -show_streams -show_format -show_chapters` output we consume.
 struct FFprobeOutput: Decodable {
     let streams: [FFprobeStream]
     let format: FFprobeFormat?
+    let chapters: [FFprobeChapter]?
+}
+
+/// One container chapter. ffprobe writes the times as strings of seconds.
+struct FFprobeChapter: Decodable {
+    let id: Int?
+    @LenientNumber var startTime: Double?
+    @LenientNumber var endTime: Double?
+    let tags: [String: String]?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case tags
+    }
+
+    /// Matroska writes `title`, some muxers `TITLE`.
+    var title: String? {
+        guard let tags else { return nil }
+        if let exact = tags["title"] { return exact }
+        return tags.first { $0.key.lowercased() == "title" }?.value
+    }
 }
 
 struct FFprobeFormat: Decodable {
