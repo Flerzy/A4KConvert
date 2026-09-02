@@ -91,6 +91,9 @@ public final class JobQueue: ObservableObject {
     private let device: MTLDevice?
     private let catalog: ShaderCatalog
     private let workQueue = DispatchQueue(label: "upscale.job-queue", qos: .userInitiated)
+    /// Previews run here rather than on `workQueue`, which is serial and busy running
+    /// the queue: a preview must not wait for a forty-minute job to finish.
+    private let previewQueue = DispatchQueue(label: "upscale.preview", qos: .userInitiated)
     private var runningJob: UpscaleJob?
     /// Ids of running jobs the user has cancelled, so their failure is labelled right.
     private var cancelledIDs: Set<UUID> = []
@@ -269,6 +272,45 @@ public final class JobQueue: ObservableObject {
         jobs[index].failureDetail = nil
     }
 
+    // MARK: - Preview
+
+    /// Renders one frame of a job both ways, off the main actor.
+    ///
+    /// The caller owns cancellation: dropping the task discards the result, though the
+    /// single ffmpeg decode already running is left to finish, which takes about as
+    /// long as one frame.
+    public func renderPreview(for id: UUID, at seconds: Double) async throws -> FramePreview.Result {
+        guard let tools, let device else {
+            throw UpscaleError.unsupportedInput(reason: environmentError ?? "No tools available.")
+        }
+        guard let job = jobs.first(where: { $0.id == id }) else {
+            throw UpscaleError.unsupportedInput(reason: "That job is no longer in the queue.")
+        }
+        let input = job.input
+        let settings = job.settings
+        let media = job.media
+        let catalog = self.catalog
+        let queue = previewQueue
+
+        return try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                continuation.resume(
+                    with: Swift.Result {
+                        try FramePreview.render(
+                            input: input,
+                            at: seconds,
+                            settings: settings,
+                            media: media,
+                            tools: tools,
+                            device: device,
+                            catalog: catalog
+                        )
+                    }
+                )
+            }
+        }
+    }
+
     // MARK: - Running
 
     public func start() {
@@ -375,6 +417,11 @@ public final class JobQueue: ObservableObject {
     }
 
     // MARK: - Error presentation
+
+    /// The one-line summary of an error, for callers outside the queue's own rows.
+    public nonisolated static func message(for error: Error) -> String {
+        describe(error).message
+    }
 
     /// Splits an error into a one-line summary and the raw tool output behind it.
 nonisolated static func describe(_ error: Error) -> (message: String, detail: String?) {

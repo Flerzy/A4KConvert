@@ -1,7 +1,10 @@
 import Foundation
 
 /// Loads and parses the vendored `.glsl` files out of the package bundle.
-public struct ShaderCatalog {
+///
+/// Immutable and read-only, so it can be handed to a background thread: `Bundle` is
+/// thread-safe for lookups, which is all this does.
+public struct ShaderCatalog: @unchecked Sendable {
     /// `Bundle.module` is internal to the package, so it is exposed here for callers
     /// that need the resource bundle explicitly.
     public static let resourceBundle = Bundle.module

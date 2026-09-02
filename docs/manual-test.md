@@ -96,6 +96,22 @@ ffmpeg -i sample.mkv -i chapters.txt -map_metadata 1 -map_chapters 1 -c copy cha
 6. Turn **Skip Openings and Endings** off, add the file again: the `OP` range is listed
    but unchecked.
 
+## 2d. Preview
+
+1. On a queued row, click **Preview…**. A sheet opens and renders one frame; the
+   spinner is replaced by the image within a second or two.
+2. Drag anywhere on the image: the divider follows the pointer, with the plain resample
+   on the left and the Anime4K result on the right. Lines are visibly cleaner on the
+   right at `Mode A+A (HQ)`.
+3. Move the time slider and release it. The frame re-renders at the new time, and the
+   timecode next to the slider matches.
+4. Change **Preset** and **Scale** in the sheet. Each change re-renders, and after
+   closing the sheet the row shows those same settings.
+5. Turn **Fit to window** off: the image goes to 100% with scroll bars. Turn it back on.
+6. Drag the time slider quickly back and forth several times: renders supersede one
+   another, the sheet never freezes, and the last position is the one shown.
+7. Close with **Done** while a render is running — the sheet closes immediately.
+
 ## 3. Running and cancelling
 
 1. Click **Start**. The row goes to **Running**.
