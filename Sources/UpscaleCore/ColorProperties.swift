@@ -85,52 +85,106 @@ public struct ColorProperties: Equatable, Sendable {
     /// True when the samples use the full 0…255 code range rather than 16…235/240.
     var isFullRange: Bool { range == "pc" || range == "full" || range == "jpeg" }
 
+    /// How the sample codes of one bit depth map onto 0…1.
+    ///
+    /// Limited range maps luma 16…235 and chroma 16…240 (scaled by the depth) onto
+    /// 0…1, so the samples are scaled after the offset is removed — BT.709-6 §6.11 and
+    /// BT.601-7 §2.5.3 for 8-bit, the same relation shifted left for 10-bit. Full range
+    /// needs no scaling, only chroma's half-scale offset.
+    private struct SampleRange {
+        let lumaScale: Double
+        let chromaScale: Double
+        let lumaOffset: Double
+        let chromaOffset: Double
+
+        init(bitDepth: Int, isFullRange: Bool) {
+            let maxCode = Double((1 << bitDepth) - 1)
+            let step = Double(1 << (bitDepth - 8))
+            lumaScale = isFullRange ? 1 : maxCode / (219 * step)
+            chromaScale = isFullRange ? 1 : maxCode / (224 * step)
+            lumaOffset = isFullRange ? 0 : 16 * step / maxCode
+            chromaOffset = 128 * step / maxCode
+        }
+    }
+
+    /// What a texture sample has to be multiplied by to become a 0…1 code value.
+    ///
+    /// 10-bit planes live in `r16Unorm` textures, so Metal hands back `code / 65535`
+    /// where the code only spans 0…1023; the difference is folded into the matrix
+    /// rather than shifted during upload, which would cost a pass over every frame.
+    private static func sampleScale(bitDepth: Int) -> Double {
+        let maxCode = Double((1 << bitDepth) - 1)
+        return bitDepth <= 8 ? 1 : 65535 / maxCode
+    }
+
     /// The rows and offset of the YUV→RGB and RGB→YUV transforms, in the 0…1 sample
     /// space Metal reads and writes.
     ///
-    /// Limited range maps luma 16…235 and chroma 16…240 onto 0…1, so the samples are
-    /// scaled by 255/219 and 255/224 after the offset is removed (BT.709-6 §6.11,
-    /// BT.601-7 §2.5.3). Full range needs no scaling; only chroma's 128/255 offset.
-    public func metalTransforms() -> (toRGB: ColorTransform, toYUV: ColorTransform) {
+    /// The input and output depths are separate: a 10-bit source can be written out as
+    /// 8-bit and the other way round.
+    public func metalTransforms(
+        inputBitDepth: Int = 8,
+        outputBitDepth: Int = 8
+    ) -> (toRGB: ColorTransform, toYUV: ColorTransform) {
         let (kr, kb) = ColorProperties.lumaCoefficients(for: matrix)
         let kg = 1 - kr - kb
-        let lumaScale = isFullRange ? 1.0 : 255.0 / 219.0
-        let chromaScale = isFullRange ? 1.0 : 255.0 / 224.0
-        let lumaOffset = isFullRange ? 0.0 : 16.0 / 255.0
-        let chromaOffset = 128.0 / 255.0
-
         // R = Y + 2(1-Kr)Cr, B = Y + 2(1-Kb)Cb, G = (Y - Kr R - Kb B) / Kg.
         let rv = 2 * (1 - kr)
         let bu = 2 * (1 - kb)
+
+        let input = SampleRange(bitDepth: inputBitDepth, isFullRange: isFullRange)
+        // The kernel computes `rows * (sample - offset)`, so scaling the samples by `s`
+        // is the same as scaling the rows by `s` and dividing the offset by it.
+        let readScale = ColorProperties.sampleScale(bitDepth: inputBitDepth)
         let toRGB = ColorTransform(
             rows: [
-                SIMD3(Float(lumaScale), 0, Float(chromaScale * rv)),
+                SIMD3(Float(input.lumaScale * readScale), 0, Float(input.chromaScale * rv * readScale)),
                 SIMD3(
-                    Float(lumaScale),
-                    Float(-chromaScale * bu * kb / kg),
-                    Float(-chromaScale * rv * kr / kg)
+                    Float(input.lumaScale * readScale),
+                    Float(-input.chromaScale * bu * kb / kg * readScale),
+                    Float(-input.chromaScale * rv * kr / kg * readScale)
                 ),
-                SIMD3(Float(lumaScale), Float(chromaScale * bu), 0),
+                SIMD3(
+                    Float(input.lumaScale * readScale),
+                    Float(input.chromaScale * bu * readScale),
+                    0
+                ),
             ],
-            offset: SIMD3(Float(lumaOffset), Float(chromaOffset), Float(chromaOffset))
+            offset: SIMD3(
+                Float(input.lumaOffset / readScale),
+                Float(input.chromaOffset / readScale),
+                Float(input.chromaOffset / readScale)
+            )
         )
 
         // Y = KrR + KgG + KbB, Cb = (B - Y)/2(1-Kb), Cr = (R - Y)/2(1-Kr).
+        let output = SampleRange(bitDepth: outputBitDepth, isFullRange: isFullRange)
+        // The kernel computes `rows * rgb + offset`, so both are scaled by the write
+        // factor, which is the inverse of the read one.
+        let writeScale = 1 / ColorProperties.sampleScale(bitDepth: outputBitDepth)
         let toYUV = ColorTransform(
             rows: [
-                SIMD3(Float(kr / lumaScale), Float(kg / lumaScale), Float(kb / lumaScale)),
                 SIMD3(
-                    Float(-kr / bu / chromaScale),
-                    Float(-kg / bu / chromaScale),
-                    Float((1 - kb) / bu / chromaScale)
+                    Float(kr / output.lumaScale * writeScale),
+                    Float(kg / output.lumaScale * writeScale),
+                    Float(kb / output.lumaScale * writeScale)
                 ),
                 SIMD3(
-                    Float((1 - kr) / rv / chromaScale),
-                    Float(-kg / rv / chromaScale),
-                    Float(-kb / rv / chromaScale)
+                    Float(-kr / bu / output.chromaScale * writeScale),
+                    Float(-kg / bu / output.chromaScale * writeScale),
+                    Float((1 - kb) / bu / output.chromaScale * writeScale)
+                ),
+                SIMD3(
+                    Float((1 - kr) / rv / output.chromaScale * writeScale),
+                    Float(-kg / rv / output.chromaScale * writeScale),
+                    Float(-kb / rv / output.chromaScale * writeScale)
                 ),
             ],
-            offset: SIMD3(Float(lumaOffset), Float(chromaOffset), Float(chromaOffset))
+            offset: SIMD3(
+                Float(output.lumaOffset * writeScale),
+                Float(output.chromaOffset * writeScale),
+                Float(output.chromaOffset * writeScale)
+            )
         )
         return (toRGB, toYUV)
     }

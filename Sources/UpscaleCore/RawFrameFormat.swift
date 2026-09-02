@@ -31,6 +31,24 @@ public struct RawFrameFormat: Equatable, Sendable {
     public static let yuv420p = RawFrameFormat(
         ffmpegName: "yuv420p", layout: .planar420(bytesPerSample: 1)
     )
+    /// 10-bit samples in the low bits of little-endian 16-bit words, which is how
+    /// ffmpeg writes every `…10le` planar format.
+    public static let yuv420p10le = RawFrameFormat(
+        ffmpegName: "yuv420p10le", layout: .planar420(bytesPerSample: 2)
+    )
+
+    /// The planar format for a source or output of this depth.
+    public static func planar(bitDepth: Int) -> RawFrameFormat {
+        bitDepth >= 10 ? .yuv420p10le : .yuv420p
+    }
+
+    /// Bits per sample the pipe carries: 8, or 10 in 16-bit words.
+    public var bitDepth: Int {
+        switch layout {
+        case .packed: return 8
+        case let .planar420(bytesPerSample): return bytesPerSample >= 2 ? 10 : 8
+        }
+    }
 
     public var isPlanar: Bool {
         if case .planar420 = layout { return true }

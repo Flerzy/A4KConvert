@@ -94,6 +94,15 @@ struct JobRow: View {
             }
             .frame(maxWidth: 220)
 
+            if job.settings.encoder.encoder.supportsTenBit {
+                Picker("Depth", selection: depthBinding) {
+                    Text("8-bit").tag(8)
+                    Text("10-bit").tag(10)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 130)
+            }
+
             VStack(alignment: .leading, spacing: 0) {
                 Text("Quality \(job.settings.encoder.quality)")
                     .font(.caption)
@@ -149,10 +158,24 @@ struct JobRow: View {
         )
     }
 
+    /// Switching to an encoder without a 10-bit path also drops the depth, so the job
+    /// can never be started in a combination the core refuses.
     private var encoderBinding: Binding<VideoEncoder> {
         Binding(
             get: { job.settings.encoder.encoder },
-            set: { value in queue.update(job.id) { $0.encoder.encoder = value } }
+            set: { value in
+                queue.update(job.id) { settings in
+                    settings.encoder.encoder = value
+                    if !value.supportsTenBit { settings.encoder.outputBitDepth = 8 }
+                }
+            }
+        )
+    }
+
+    private var depthBinding: Binding<Int> {
+        Binding(
+            get: { job.settings.encoder.outputBitDepth },
+            set: { value in queue.update(job.id) { $0.encoder.outputBitDepth = value } }
         )
     }
 

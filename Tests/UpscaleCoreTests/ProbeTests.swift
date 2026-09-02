@@ -83,8 +83,49 @@ final class ProbeParsingTests: XCTestCase {
         XCTAssertEqual(info.video.sampleAspectRatio, Rational.one)
         XCTAssertEqual(info.estimatedFrameCount, 250)
 
+        // 10-bit is processed now; this file is refused for being HDR, not for its depth.
         let reason = try XCTUnwrap(info.rejectionReason())
-        XCTAssertTrue(reason.contains("10-bit"), reason)
+        XCTAssertTrue(reason.contains("smpte2084"), reason)
+    }
+
+    /// 12-bit has no plane format on the pipes, so it is still refused.
+    func testTwelveBitIsRefused() throws {
+        let json = """
+        {
+          "streams": [{
+            "index": 0, "codec_name": "hevc", "codec_type": "video",
+            "width": 1280, "height": 720, "pix_fmt": "yuv420p12le",
+            "bits_per_raw_sample": "12", "r_frame_rate": "25/1",
+            "avg_frame_rate": "25/1"
+          }],
+          "format": {"format_name": "matroska,webm", "duration": "10.000"}
+        }
+        """.data(using: .utf8)!
+
+        let info = try Probe.parse(json: json, path: "twelve.mkv")
+        XCTAssertEqual(info.video.bitDepth, 12)
+        let reason = try XCTUnwrap(info.rejectionReason())
+        XCTAssertTrue(reason.contains("12-bit"), reason)
+    }
+
+    /// Plain 10-bit SDR passes the gate.
+    func testTenBitSDRIsAccepted() throws {
+        let json = """
+        {
+          "streams": [{
+            "index": 0, "codec_name": "hevc", "codec_type": "video",
+            "width": 1920, "height": 1080, "pix_fmt": "yuv420p10le",
+            "bits_per_raw_sample": "10", "r_frame_rate": "24000/1001",
+            "avg_frame_rate": "24000/1001", "color_space": "bt709",
+            "color_primaries": "bt709", "color_transfer": "bt709"
+          }],
+          "format": {"format_name": "matroska,webm", "duration": "1420.0"}
+        }
+        """.data(using: .utf8)!
+
+        let info = try Probe.parse(json: json, path: "anime.mkv")
+        XCTAssertEqual(info.video.bitDepth, 10)
+        XCTAssertNil(info.rejectionReason())
     }
 
     func testAnamorphicDetection() throws {

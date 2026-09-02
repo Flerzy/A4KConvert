@@ -71,8 +71,9 @@ absolute difference of about 0.01/255 — see `Anime4KEngineTests`.
 
 - Presets: Anime4K Mode A and Mode A+A, each in a Fast and an HQ variant.
 - Encoders: `hevc_videotoolbox` (default) and `h264_videotoolbox`.
-- 8-bit SDR input only. 10-bit and HDR sources are refused with a clear message rather
-  than silently producing wrong colours.
+- 8- and 10-bit SDR input. A 10-bit source is written back as 10-bit HEVC by default;
+  H.264 has no 10-bit VideoToolbox encoder, so it stays 8-bit. 12-bit and HDR sources
+  are refused with a clear message rather than silently producing wrong colours.
 - Preset, scale, encoder, quality and an optional output folder are remembered between
   launches, and one row's settings can be pushed onto every other queued row.
 - Skip segments: time ranges — detected from opening/ending chapters or typed by hand —

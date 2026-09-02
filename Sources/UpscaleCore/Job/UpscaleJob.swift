@@ -106,12 +106,16 @@ public final class UpscaleJob: @unchecked Sendable {
         try checkCancelled()
 
         let container = settings.resolvedContainer(for: input)
+        // Both pipes follow the depths involved: the decode side the source's, the
+        // encode side the one being written.
+        let decodeFormat = RawFrameFormat.planar(bitDepth: media.video.bitDepth)
+        let encodeFormat = RawFrameFormat.planar(bitDepth: settings.encoder.outputBitDepth)
         let plan = EncodePlan.make(
             for: media,
             scale: settings.scale,
             settings: settings.encoder,
             container: container,
-            format: .yuv420p
+            format: encodeFormat
         )
         try EncodeProcess.validate(plan)
 
@@ -126,7 +130,11 @@ public final class UpscaleJob: @unchecked Sendable {
         let inputSize = PixelSize(width: media.video.width, height: media.video.height)
         let targetSize = PixelSize(width: plan.width, height: plan.height)
         try engine.configure(
-            inputSize: inputSize, targetSize: targetSize, color: plan.color
+            inputSize: inputSize,
+            targetSize: targetSize,
+            color: plan.color,
+            inputBitDepth: decodeFormat.bitDepth,
+            outputBitDepth: encodeFormat.bitDepth
         )
         try checkCancelled()
 
@@ -135,7 +143,7 @@ public final class UpscaleJob: @unchecked Sendable {
         }
 
         let decode = DecodeProcess(
-            ffmpeg: tools.ffmpeg, input: input, media: media, format: .yuv420p
+            ffmpeg: tools.ffmpeg, input: input, media: media, format: decodeFormat
         )
         let encode = EncodeProcess(
             ffmpeg: tools.ffmpeg,
@@ -161,6 +169,8 @@ public final class UpscaleJob: @unchecked Sendable {
                 decode: decode,
                 encode: encode,
                 engine: engine,
+                decodeFormat: decodeFormat,
+                encodeFormat: encodeFormat,
                 skipPlan: skipPlan,
                 commandQueue: commandQueue,
                 inputSize: inputSize,
@@ -282,6 +292,8 @@ public final class UpscaleJob: @unchecked Sendable {
         decode: DecodeProcess,
         encode: EncodeProcess,
         engine: Anime4KEngine,
+        decodeFormat: RawFrameFormat,
+        encodeFormat: RawFrameFormat,
         skipPlan: SkipPlan,
         commandQueue: MTLCommandQueue,
         inputSize: PixelSize,
@@ -299,7 +311,7 @@ public final class UpscaleJob: @unchecked Sendable {
         let writer = FrameWriter(handle: try require(encode.inputHandle, "encoder stdin"))
 
         // Preallocated once: the job does no per-frame allocation after this point.
-        let outputByteCount = RawFrameFormat.yuv420p.frameByteCount(
+        let outputByteCount = encodeFormat.frameByteCount(
             width: targetSize.width, height: targetSize.height
         )
         var slots: [FrameSlot] = []
@@ -307,10 +319,12 @@ public final class UpscaleJob: @unchecked Sendable {
             slots.append(
                 FrameSlot(
                     input: try FrameTextures.makePlanes(
-                        device: device, width: inputSize.width, height: inputSize.height
+                        device: device, width: inputSize.width, height: inputSize.height,
+                        format: decodeFormat
                     ),
                     output: try FrameTextures.makePlanes(
-                        device: device, width: targetSize.width, height: targetSize.height
+                        device: device, width: targetSize.width, height: targetSize.height,
+                        format: encodeFormat
                     ),
                     byteCount: outputByteCount
                 )

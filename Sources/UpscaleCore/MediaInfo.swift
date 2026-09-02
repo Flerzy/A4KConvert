@@ -158,17 +158,20 @@ public struct MediaInfo: Equatable, Sendable {
         return Int((seconds * rate).rounded())
     }
 
-    /// v1 processes 8-bit SDR only; anything else is refused rather than mangled.
+    /// 8- and 10-bit SDR are processed; anything else is refused rather than mangled.
+    ///
+    /// The shaders were trained on SDR, so HDR transfers and BT.2020 primaries stay out
+    /// regardless of depth, and 12-bit has no plane format on the pipes.
     public func rejectionReason() -> String? {
-        if video.bitDepth != 8 {
-            return "\(video.bitDepth)-bit video (\(video.pixelFormat)) is not supported in v1 — "
-                + "only 8-bit SDR input."
+        if video.bitDepth != 8, video.bitDepth != 10 {
+            return "\(video.bitDepth)-bit video (\(video.pixelFormat)) is not supported — "
+                + "only 8- and 10-bit SDR input."
         }
         if let transfer = video.colorTransfer, MediaInfo.hdrTransfers.contains(transfer) {
-            return "HDR transfer function '\(transfer)' is not supported in v1."
+            return "HDR transfer function '\(transfer)' is not supported."
         }
         if let primaries = video.colorPrimaries, primaries == "bt2020" {
-            return "BT.2020 primaries are not supported in v1."
+            return "BT.2020 primaries are not supported."
         }
         return nil
     }

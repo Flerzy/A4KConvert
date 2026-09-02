@@ -54,18 +54,32 @@ public enum FrameTextures {
         public let luma: MTLTexture
         public let chromaBlue: MTLTexture
         public let chromaRed: MTLTexture
+        /// The pipe format these planes were made for, which fixes the sample size and
+        /// therefore the layout of the contiguous frame they pack into.
+        public let format: RawFrameFormat
 
-        public init(luma: MTLTexture, chromaBlue: MTLTexture, chromaRed: MTLTexture) {
+        public init(
+            luma: MTLTexture,
+            chromaBlue: MTLTexture,
+            chromaRed: MTLTexture,
+            format: RawFrameFormat = .yuv420p
+        ) {
             self.luma = luma
             self.chromaBlue = chromaBlue
             self.chromaRed = chromaRed
+            self.format = format
         }
 
         public var width: Int { luma.width }
         public var height: Int { luma.height }
+        public var bitDepth: Int { format.bitDepth }
     }
 
-    public static let planePixelFormat: MTLPixelFormat = .r8Unorm
+    /// 8-bit planes are `r8Unorm`; 10-bit ones are `r16Unorm` with the code in the low
+    /// bits, which the colour kernels' matrices already account for.
+    public static func planePixelFormat(for format: RawFrameFormat) -> MTLPixelFormat {
+        format.bitDepth >= 10 ? .r16Unorm : .r8Unorm
+    }
 
     public static func makePlanes(
         device: MTLDevice,
@@ -73,6 +87,7 @@ public enum FrameTextures {
         height: Int,
         format: RawFrameFormat = .yuv420p
     ) throws -> YUVPlanes {
+        let planePixelFormat = planePixelFormat(for: format)
         let planes = format.planeLayout(width: width, height: height)
         guard planes.count == 3 else {
             throw EngineError.sizeMismatch(expected: "three planes", got: "\(planes.count)")
@@ -96,17 +111,14 @@ public enum FrameTextures {
         return YUVPlanes(
             luma: try make(planes[0]),
             chromaBlue: try make(planes[1]),
-            chromaRed: try make(planes[2])
+            chromaRed: try make(planes[2]),
+            format: format
         )
     }
 
     /// Splits one contiguous planar frame off the pipe into the three plane textures.
-    public static func upload(
-        planar frame: Data,
-        to planes: YUVPlanes,
-        format: RawFrameFormat = .yuv420p
-    ) throws {
-        let layout = format.planeLayout(width: planes.width, height: planes.height)
+    public static func upload(planar frame: Data, to planes: YUVPlanes) throws {
+        let layout = planes.format.planeLayout(width: planes.width, height: planes.height)
         let expected = layout.reduce(0) { $0 + $1.byteCount }
         guard frame.count == expected else {
             throw EngineError.sizeMismatch(
@@ -129,10 +141,9 @@ public enum FrameTextures {
     /// Packs the three plane textures back into one contiguous frame for the pipe.
     public static func readback(
         planes: YUVPlanes,
-        into buffer: UnsafeMutableRawBufferPointer,
-        format: RawFrameFormat = .yuv420p
+        into buffer: UnsafeMutableRawBufferPointer
     ) throws {
-        let layout = format.planeLayout(width: planes.width, height: planes.height)
+        let layout = planes.format.planeLayout(width: planes.width, height: planes.height)
         let expected = layout.reduce(0) { $0 + $1.byteCount }
         guard buffer.count == expected else {
             throw EngineError.sizeMismatch(

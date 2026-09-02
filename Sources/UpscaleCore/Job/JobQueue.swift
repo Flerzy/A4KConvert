@@ -147,6 +147,12 @@ public final class JobQueue: ObservableObject {
         switch result {
         case let .success(media):
             jobs[index].media = media
+            // A 10-bit source is written back as 10-bit by default: dropping to 8 would
+            // add banding the source did not have. H.264 has no 10-bit VideoToolbox
+            // encoder, so it stays at 8 there.
+            if media.video.bitDepth >= 10, jobs[index].settings.encoder.encoder.supportsTenBit {
+                jobs[index].settings.encoder.outputBitDepth = 10
+            }
             let detected = ChapterSkipDetector.skippableRanges(in: media)
             jobs[index].detectedSkipRanges = detected
             if defaults.autoSkipChapters {

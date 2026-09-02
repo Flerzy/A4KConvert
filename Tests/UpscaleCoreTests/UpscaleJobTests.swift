@@ -152,22 +152,96 @@ final class UpscaleJobTests: XCTestCase {
         return count
     }
 
-    func testTenBitInputIsRefusedBeforeAnythingIsWritten() throws {
+    /// Most modern anime encodes are 10-bit HEVC, and they now go through end to end
+    /// and come back out 10-bit.
+    func testTenBitInputIsAcceptedAndWrittenAsTenBit() throws {
+        let (tools, device) = try requireEnvironment()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var spec = TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 0.5)
+        spec.pixelFormat = "yuv420p10le"
+        spec.videoCodec = "libx265"
+        spec.includeSubtitles = false
+        spec.extraOutputArguments = ["-x265-params", "log-level=none"]
+        let fixture = try TestSupport.makeFixture(spec, in: directory)
+
+        let output = directory.appendingPathComponent("tenbit.mkv")
+        let job = UpscaleJob(
+            input: fixture,
+            settings: UpscaleJobSettings(
+                scale: 2,
+                encoder: EncoderSettings(encoder: .hevc, quality: 60, outputBitDepth: 10),
+                output: output
+            ),
+            tools: tools,
+            device: device
+        )
+        let source = try job.run()
+        XCTAssertEqual(source.video.bitDepth, 10)
+
+        let result = try Probe(tools: tools).probe(url: output)
+        XCTAssertEqual(result.video.pixelFormat, "yuv420p10le")
+        XCTAssertEqual(result.video.bitDepth, 10)
+        XCTAssertEqual(result.video.width, source.video.width * 2)
+        XCTAssertEqual(result.video.height, source.video.height * 2)
+
+        let sourceDuration = try XCTUnwrap(source.duration)
+        let outputDuration = try XCTUnwrap(result.duration)
+        let frameDuration = 1.0 / source.video.realFrameRate.doubleValue
+        XCTAssertEqual(outputDuration, sourceDuration, accuracy: frameDuration * 1.5)
+    }
+
+    /// A 10-bit source can still be written as 8-bit, and H.264 has no other option.
+    func testTenBitSourceCanBeWrittenAsEightBit() throws {
+        let (tools, device) = try requireEnvironment()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var spec = TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 0.5)
+        spec.pixelFormat = "yuv420p10le"
+        spec.videoCodec = "libx265"
+        spec.includeSubtitles = false
+        spec.extraOutputArguments = ["-x265-params", "log-level=none"]
+        let fixture = try TestSupport.makeFixture(spec, in: directory)
+
+        let output = directory.appendingPathComponent("eightbit.mkv")
+        let job = UpscaleJob(
+            input: fixture,
+            settings: UpscaleJobSettings(
+                scale: 2,
+                encoder: EncoderSettings(encoder: .h264, quality: 60),
+                output: output
+            ),
+            tools: tools,
+            device: device
+        )
+        _ = try job.run()
+
+        let result = try Probe(tools: tools).probe(url: output)
+        XCTAssertEqual(result.video.bitDepth, 8)
+        XCTAssertEqual(result.video.codec, "h264")
+    }
+
+    /// Asking H.264 for 10-bit has to fail before any file is opened, rather than
+    /// silently writing 8-bit.
+    func testTenBitOnH264IsRefusedBeforeAnythingIsWritten() throws {
         let (tools, device) = try requireEnvironment()
         let directory = try TestSupport.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let fixture = try TestSupport.makeFixture(
-            TestSupport.FixtureSpec(
-                width: 160, height: 120, durationSeconds: 0.5,
-                pixelFormat: "yuv420p10le", includeSubtitles: false
-            ),
+            TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 0.5),
             in: directory
         )
         let output = directory.appendingPathComponent("nope.mkv")
         let job = UpscaleJob(
             input: fixture,
-            settings: UpscaleJobSettings(scale: 2, output: output),
+            settings: UpscaleJobSettings(
+                scale: 2,
+                encoder: EncoderSettings(encoder: .h264, quality: 60, outputBitDepth: 10),
+                output: output
+            ),
             tools: tools,
             device: device
         )

@@ -90,6 +90,51 @@ final class ColorConversionTests: XCTestCase {
         XCTAssertLessThan(difference, 2.0)
     }
 
+    /// 10-bit planes live in `r16Unorm` textures with the code in the low bits, so the
+    /// matrices carry a 65535/1023 factor. Getting that wrong scales the whole image by
+    /// 64, which this catches immediately.
+    func testTenBitYUVToRGBMatchesFFmpeg() throws {
+        let tools = try TestSupport.requireTools()
+        let device = try requireDevice()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let source = directory.appendingPathComponent("source10.yuv")
+        try run(
+            tools.ffmpeg,
+            [
+                "-nostdin", "-v", "error", "-y",
+                "-f", "lavfi", "-i", "testsrc2=size=\(width)x\(height)",
+                "-frames:v", "1", "-pix_fmt", "yuv420p10le", "-f", "rawvideo", source.path,
+            ]
+        )
+        let planarFrame = try Data(contentsOf: source)
+        XCTAssertEqual(
+            planarFrame.count,
+            RawFrameFormat.yuv420p10le.frameByteCount(width: width, height: height)
+        )
+
+        let reference = directory.appendingPathComponent("ref10.rgb")
+        try run(
+            tools.ffmpeg,
+            [
+                "-nostdin", "-v", "error", "-y",
+                "-f", "rawvideo", "-pix_fmt", "yuv420p10le",
+                "-video_size", "\(width)x\(height)", "-i", source.path,
+                "-vf", "scale=in_color_matrix=bt709:in_range=tv",
+                "-pix_fmt", "rgb24", "-f", "rawvideo", reference.path,
+            ]
+        )
+
+        let ours = try metalYUVToRGB(
+            planarFrame, device: device, color: properties(matrix: "bt709", range: "tv"),
+            format: .yuv420p10le
+        )
+        let difference = meanAbsoluteDifference(ours, [UInt8](try Data(contentsOf: reference)))
+        print("yuv420p10le->rgb bt709/tv: \(difference)/255")
+        XCTAssertLessThan(difference, 3.0)
+    }
+
     // MARK: - RGB to YUV
 
     func testRGBToYUVMatchesFFmpegForEveryMatrixAndRange() throws {
@@ -211,18 +256,21 @@ final class ColorConversionTests: XCTestCase {
         device: MTLDevice,
         color: ColorProperties,
         width: Int? = nil,
-        height: Int? = nil
+        height: Int? = nil,
+        format: RawFrameFormat = .yuv420p
     ) throws -> [UInt8] {
         let width = width ?? self.width
         let height = height ?? self.height
-        let planes = try FrameTextures.makePlanes(device: device, width: width, height: height)
+        let planes = try FrameTextures.makePlanes(
+            device: device, width: width, height: height, format: format
+        )
         try FrameTextures.upload(planar: yuv, to: planes)
 
         let destination = try FrameTextures.makeTexture(device: device, width: width, height: height)
         let pipeline = try makePipeline(
             device: device, source: ColorKernels.toRGBSource, name: ColorKernels.toRGBFunctionName
         )
-        var transform = color.metalTransforms().toRGB
+        var transform = color.metalTransforms(inputBitDepth: format.bitDepth).toRGB
 
         try encode(device: device) { commandBuffer in
             let encoder = try XCTUnwrap(commandBuffer.makeComputeCommandEncoder())
@@ -266,6 +314,7 @@ final class ColorConversionTests: XCTestCase {
             device: device, source: ColorKernels.toYUVSource, name: ColorKernels.toYUVFunctionName
         )
         var transform = color.metalTransforms().toYUV
+
 
         try encode(device: device) { commandBuffer in
             let encoder = try XCTUnwrap(commandBuffer.makeComputeCommandEncoder())

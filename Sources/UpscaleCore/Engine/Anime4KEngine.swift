@@ -55,7 +55,9 @@ public final class Anime4KEngine {
         targetSize: PixelSize,
         color: ColorProperties = ColorProperties(
             matrix: "bt709", range: "tv", primaries: "bt709", transfer: "bt709"
-        )
+        ),
+        inputBitDepth: Int = 8,
+        outputBitDepth: Int = 8
     ) throws {
         let plan = try RenderPlan.build(
             stages: stages,
@@ -73,7 +75,9 @@ public final class Anime4KEngine {
             source: ColorKernels.toYUVSource, function: ColorKernels.toYUVFunctionName
         )
 
-        let transforms = color.metalTransforms()
+        let transforms = color.metalTransforms(
+            inputBitDepth: inputBitDepth, outputBitDepth: outputBitDepth
+        )
         self.toRGBTransform = transforms.toRGB
         self.toYUVTransform = transforms.toYUV
         self.toRGBPipeline = toRGBPipeline

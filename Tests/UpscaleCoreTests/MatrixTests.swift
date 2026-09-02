@@ -13,6 +13,7 @@ final class MatrixTests: XCTestCase {
         var spec: TestSupport.FixtureSpec
         var outputExtension: String?
         var scale = 2
+        var outputBitDepth = 8
     }
 
     private func requireMatrix() throws -> (FFmpegTools, MTLDevice) {
@@ -38,10 +39,22 @@ final class MatrixTests: XCTestCase {
         var cases: [Case] = []
 
         func add(_ name: String, _ configure: (inout TestSupport.FixtureSpec) -> Void,
-                 outputExtension: String? = nil, scale: Int = 2) {
+                 outputExtension: String? = nil, scale: Int = 2, outputBitDepth: Int = 8) {
             var spec = baseSpec
             configure(&spec)
-            cases.append(Case(name: name, spec: spec, outputExtension: outputExtension, scale: scale))
+            cases.append(
+                Case(
+                    name: name, spec: spec, outputExtension: outputExtension, scale: scale,
+                    outputBitDepth: outputBitDepth
+                )
+            )
+        }
+
+        /// A 10-bit HEVC source, which is what most modern anime releases are.
+        func tenBit(_ spec: inout TestSupport.FixtureSpec) {
+            spec.videoCodec = "libx265"
+            spec.pixelFormat = "yuv420p10le"
+            spec.extraOutputArguments = ["-x265-params", "log-level=none"]
         }
 
         // Containers.
@@ -112,6 +125,30 @@ final class MatrixTests: XCTestCase {
             spec.attachments = ["/System/Library/Fonts/Monaco.ttf"]
         }
 
+        // Bit depths, across containers and both directions of conversion.
+        add("10-bit mkv", { spec in tenBit(&spec) }, outputBitDepth: 10)
+        add(
+            "10-bit mp4",
+            { spec in
+                tenBit(&spec)
+                spec.container = "mp4"
+            },
+            outputBitDepth: 10
+        )
+        add("10-bit source, 8-bit output") { spec in tenBit(&spec) }
+        add("8-bit source, 10-bit output", { _ in }, outputBitDepth: 10)
+        add(
+            "10-bit bt601 tagged",
+            { spec in
+                tenBit(&spec)
+                spec.colorspace = "bt470bg"
+                spec.colorPrimaries = "bt470bg"
+                spec.colorTransfer = "smpte170m"
+                spec.colorRange = "tv"
+            },
+            outputBitDepth: 10
+        )
+
         // Scale factors.
         add("4x", { _ in }, scale: 4)
         // Odd dimensions: 2x of an odd size is even, so this must simply work. 4:2:0
@@ -144,7 +181,9 @@ final class MatrixTests: XCTestCase {
                 settings: UpscaleJobSettings(
                     preset: try XCTUnwrap(Preset.preset(id: "mode-a-fast")),
                     scale: testCase.scale,
-                    encoder: EncoderSettings(encoder: .hevc, quality: 55),
+                    encoder: EncoderSettings(
+                        encoder: .hevc, quality: 55, outputBitDepth: testCase.outputBitDepth
+                    ),
                     output: output
                 ),
                 tools: tools,
@@ -167,6 +206,11 @@ final class MatrixTests: XCTestCase {
             )
             XCTAssertEqual(
                 result.video.height, source.video.height * testCase.scale, "\(testCase.name) height"
+            )
+
+            // The written depth is the one that was asked for, in both directions.
+            XCTAssertEqual(
+                result.video.bitDepth, testCase.outputBitDepth, "\(testCase.name) bit depth"
             )
 
             // Frame rate stays exactly rational.
@@ -331,8 +375,9 @@ final class MatrixTests: XCTestCase {
         return abs(video - audio)
     }
 
-    /// 10-bit input is refused rather than silently converted, in every container.
-    func testTenBitIsRefusedAcrossContainers() throws {
+    /// 12-bit input has no plane format on the pipes, so it is refused rather than
+    /// silently converted, in every container.
+    func testTwelveBitIsRefusedAcrossContainers() throws {
         let (tools, device) = try requireMatrix()
         for container in ["mkv", "mp4"] {
             let directory = try TestSupport.makeTemporaryDirectory()
@@ -340,7 +385,7 @@ final class MatrixTests: XCTestCase {
 
             var spec = MatrixTests.baseSpec
             spec.container = container
-            spec.pixelFormat = "yuv420p10le"
+            spec.pixelFormat = "yuv420p12le"
             spec.videoCodec = "libx265"
             spec.includeSubtitles = false
             spec.extraOutputArguments = ["-x265-params", "log-level=none"]
@@ -357,7 +402,7 @@ final class MatrixTests: XCTestCase {
                 guard case let UpscaleError.unsupportedInput(reason) = error else {
                     return XCTFail("\(container): expected unsupportedInput, got \(error)")
                 }
-                XCTAssertTrue(reason.contains("10-bit"), reason)
+                XCTAssertTrue(reason.contains("12-bit"), reason)
             }
             XCTAssertFalse(FileManager.default.fileExists(atPath: output.path), container)
         }

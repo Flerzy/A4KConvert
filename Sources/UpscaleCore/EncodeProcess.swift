@@ -99,6 +99,14 @@ public final class EncodeProcess {
                     + "4:2:0 encoding needs even width and height."
             )
         }
+        // Silently dropping to 8-bit would be a quality regression the user never asked
+        // for, so an impossible combination fails instead.
+        guard plan.settings.outputBitDepth < 10 || plan.settings.encoder.supportsTenBit else {
+            throw UpscaleError.unsupportedInput(
+                reason: "\(plan.settings.encoder.displayName) cannot write 10-bit video; "
+                    + "choose HEVC or 8-bit output."
+            )
+        }
     }
 
     public static func arguments(
@@ -189,7 +197,13 @@ public final class EncodeProcess {
         // source's matrix and range, so there is nothing left for the scaler to do.
         var stages: [String] = plan.format.isPlanar
             ? []
-            : [plan.color.rgbToYUVFilter(pixelFormat: plan.settings.encoder.encodePixelFormat)]
+            : [
+                plan.color.rgbToYUVFilter(
+                    pixelFormat: plan.settings.encoder.encodePixelFormat(
+                        bitDepth: plan.settings.outputBitDepth
+                    )
+                )
+            ]
         let sar = plan.sampleAspectRatio.reduced
         if sar.numerator > 0, sar.denominator > 0 {
             stages.append("setsar=\(sar.numerator)/\(sar.denominator)")

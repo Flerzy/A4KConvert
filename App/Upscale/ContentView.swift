@@ -79,7 +79,7 @@ private struct EmptyStateView: View {
                 .foregroundStyle(.secondary)
             Text("Drop video files here")
                 .font(.title3)
-            Text("Any container ffmpeg can read, including MKV. 8-bit SDR only.")
+            Text("Any container ffmpeg can read, including MKV. 8- and 10-bit SDR.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }

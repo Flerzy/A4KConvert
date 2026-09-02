@@ -203,7 +203,7 @@ final class JobQueueTests: XCTestCase {
         XCTAssertNotNil(queue.jobs[0].failureMessage)
     }
 
-    func testTenBitProbeFailsTheRowWithoutRunning() throws {
+    func testTenBitSourceIsQueuedAndDefaultsToTenBitOutput() throws {
         let queue = try makeQueue()
         let directory = try TestSupport.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -219,11 +219,27 @@ final class JobQueueTests: XCTestCase {
 
         queue.add([fixture])
         waitForProbes(queue)
-        XCTAssertEqual(queue.jobs[0].state, .failed)
-        XCTAssertTrue(
-            queue.jobs[0].failureMessage?.contains("10-bit") == true,
-            queue.jobs[0].failureMessage ?? "nil"
+        XCTAssertEqual(queue.jobs[0].state, .queued)
+        XCTAssertEqual(queue.jobs[0].media?.video.bitDepth, 10)
+        // A 10-bit source keeps its depth unless the user says otherwise.
+        XCTAssertEqual(queue.jobs[0].settings.encoder.outputBitDepth, 10)
+    }
+
+    /// An 8-bit source is not silently promoted; 10-bit output costs bitrate for
+    /// precision that is not in the file.
+    func testEightBitSourceStaysEightBit() throws {
+        let queue = try makeQueue()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try TestSupport.makeFixture(
+            TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 0.5),
+            in: directory
         )
+
+        queue.add([fixture])
+        waitForProbes(queue)
+        XCTAssertEqual(queue.jobs[0].state, .queued)
+        XCTAssertEqual(queue.jobs[0].settings.encoder.outputBitDepth, 8)
     }
 }
 

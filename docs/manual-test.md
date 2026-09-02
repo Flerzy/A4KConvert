@@ -125,16 +125,37 @@ mpv out.mkv
 - Duration matches the source to within one frame.
 - Audio stays in sync to the end of playback.
 
-## 5. Error surfacing
+## 4b. 10-bit sources
 
-1. Add a 10-bit file:
+1. Make a 10-bit file:
 
    ```sh
    ffmpeg -f lavfi -i testsrc2=size=320x240:rate=25 -t 5 \
           -c:v libx265 -pix_fmt yuv420p10le tenbit.mkv
    ```
 
-   The row goes straight to **Failed** with "10-bit video … is not supported in v1",
+2. Add it. The row is **Queued**, and its **Depth** control already reads **10-bit**.
+3. Run it and check the output kept the depth:
+
+   ```sh
+   ffprobe -v error -show_entries stream=pix_fmt,profile -of csv out.mkv
+   ```
+
+   It reads `yuv420p10le` and `Main 10`.
+4. Set **Encoder** to H.264 on a fresh row of the same file: the **Depth** control
+   disappears and the job writes 8-bit, since VideoToolbox has no 10-bit H.264.
+5. Set **Depth** back to 8-bit on an HEVC row and confirm the output is `yuv420p`.
+
+## 5. Error surfacing
+
+1. Add a 12-bit file:
+
+   ```sh
+   ffmpeg -f lavfi -i testsrc2=size=320x240:rate=25 -t 5 \
+          -c:v libx265 -pix_fmt yuv420p12le twelvebit.mkv
+   ```
+
+   The row goes straight to **Failed** with "12-bit video … is not supported",
    without any file being written.
 2. Add a queued job whose output path is not writable (choose `/` as the destination).
    Start it. The row fails with the ffmpeg message on one line, and a **Details**

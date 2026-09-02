@@ -206,6 +206,81 @@ final class Anime4KEngineTests: XCTestCase {
         XCTAssertGreaterThan(try passthrough.meanAbsoluteDifference(to: upscaled), 2.0 / 255.0)
     }
 
+    /// The planar path at 8 and at 10 bits has to produce the same picture: the extra
+    /// depth only buys precision, it must not shift or scale anything. Both are also
+    /// checked against the mpv golden, loosely, because a 4:2:0 round trip on a 480p
+    /// frame costs more than the chain itself does.
+    func testPlanarPathMatchesAtEightAndTenBits() throws {
+        let device = try requireDevice()
+        let source = try ImageFixture.load(named: "anime4k_source_640x480")
+        let reference = try ImageFixture.load(named: "anime4k_mode_a_fast_1280x960")
+        let targetSize = PixelSize(width: reference.width, height: reference.height)
+        let color = ColorProperties(
+            matrix: "bt709", range: "tv", primaries: "bt709", transfer: "bt709"
+        )
+
+        var results: [Int: ImageFixture] = [:]
+        for bitDepth in [8, 10] {
+            let format = RawFrameFormat.planar(bitDepth: bitDepth)
+            let engine = try Anime4KEngine(
+                preset: try XCTUnwrap(Preset.preset(id: "mode-a-fast")),
+                device: device
+            )
+            try engine.configure(
+                inputSize: PixelSize(width: source.width, height: source.height),
+                targetSize: targetSize,
+                color: color,
+                inputBitDepth: bitDepth,
+                outputBitDepth: bitDepth
+            )
+
+            let input = try FrameTextures.makePlanes(
+                device: device, width: source.width, height: source.height, format: format
+            )
+            try FrameTextures.upload(
+                planar: PlanarFixture.encode(
+                    source, color: color, format: format
+                ),
+                to: input
+            )
+            let output = try FrameTextures.makePlanes(
+                device: device, width: targetSize.width, height: targetSize.height,
+                format: format
+            )
+
+            let queue = try XCTUnwrap(device.makeCommandQueue())
+            let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+            try engine.encode(commandBuffer: commandBuffer, input: input, output: output)
+            commandBuffer.commit()
+            commandBuffer.waitUntilCompleted()
+            if let error = commandBuffer.error { throw error }
+
+            var buffer = [UInt8](
+                repeating: 0,
+                count: format.frameByteCount(width: targetSize.width, height: targetSize.height)
+            )
+            try buffer.withUnsafeMutableBytes { raw in
+                try FrameTextures.readback(planes: output, into: raw)
+            }
+            results[bitDepth] = PlanarFixture.decode(
+                buffer, width: targetSize.width, height: targetSize.height,
+                color: color, format: format
+            )
+        }
+
+        let eight = try XCTUnwrap(results[8])
+        let ten = try XCTUnwrap(results[10])
+        let betweenDepths = try eight.meanAbsoluteDifference(to: ten)
+        print("planar 8-bit vs 10-bit: \(betweenDepths)/255")
+        XCTAssertLessThan(betweenDepths, 0.5)
+
+        for (bitDepth, result) in results {
+            let difference = try result.meanAbsoluteDifference(to: reference)
+            print("planar \(bitDepth)-bit vs mpv golden: \(difference)/255")
+            XCTAssertLessThan(difference, 3.0, "\(bitDepth)-bit")
+        }
+    }
+
     func testWrongInputSizeIsRejected() throws {
         let device = try requireDevice()
         let engine = try Anime4KEngine(preset: Preset.all[0], device: device)
