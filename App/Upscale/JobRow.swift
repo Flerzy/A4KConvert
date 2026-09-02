@@ -7,7 +7,7 @@ struct JobRow: View {
     @EnvironmentObject private var queue: JobQueue
     let job: QueuedJob
     @State private var showsFailureDetail = false
-    @State private var showsPreview = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -22,10 +22,6 @@ struct JobRow: View {
             if let message = job.failureMessage {
                 failure(message)
             }
-        }
-        .sheet(isPresented: $showsPreview) {
-            PreviewSheet(jobID: job.id)
-                .environmentObject(queue)
         }
     }
 
@@ -140,7 +136,7 @@ struct JobRow: View {
             Button("Output…") { queue.presentSavePanel(for: job) }
                 .help(job.settings.output.path)
 
-            Button("Preview…") { showsPreview = true }
+            Button("Preview…") { openWindow(id: PreviewWindow.sceneID, value: job.id) }
                 .disabled(job.media == nil)
                 .help("See this preset on one frame before running the job")
 
