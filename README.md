@@ -50,7 +50,14 @@ input.mkv → ffmpeg (decode to raw bgra) → Metal: Anime4K passes → ffmpeg (
 ```
 
 Two ffmpeg subprocesses are connected to the app by pipes; the app never links libav*.
-Frames cross as raw `bgra`, which maps 1:1 onto `MTLPixelFormat.bgra8Unorm`.
+Frames cross as raw `bgra`, which maps 1:1 onto `MTLPixelFormat.bgra8Unorm`. Decoding
+uses VideoToolbox where the codec allows it, and ffmpeg falls back to software
+otherwise.
+
+The job runs two threads over a fixed set of frame slots: one reads and commits work to
+the GPU, the other waits on each command buffer, reads the frame back and writes it to
+the encoder. Overlapping the pipe write with GPU work is worth about a third of the
+end-to-end throughput at 1080p→4K.
 
 The Anime4K shaders are mpv user shaders written in GLSL. They are translated to Metal
 Shading Language at runtime and compiled with `MTLDevice.makeLibrary(source:)`, so no

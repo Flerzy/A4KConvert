@@ -46,6 +46,26 @@ public enum FrameTextures {
         }
     }
 
+    /// Copies a frame into a caller-owned buffer, which the job reuses across frames.
+    public static func readback(
+        from texture: MTLTexture,
+        into buffer: UnsafeMutableRawBufferPointer
+    ) throws {
+        let bytesPerRow = texture.width * 4
+        let expected = bytesPerRow * texture.height
+        guard buffer.count == expected else {
+            throw EngineError.sizeMismatch(
+                expected: "\(expected) bytes", got: "\(buffer.count) bytes"
+            )
+        }
+        texture.getBytes(
+            buffer.baseAddress!,
+            bytesPerRow: bytesPerRow,
+            from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+            mipmapLevel: 0
+        )
+    }
+
     public static func readback(from texture: MTLTexture) -> Data {
         let bytesPerRow = texture.width * 4
         var data = Data(count: bytesPerRow * texture.height)

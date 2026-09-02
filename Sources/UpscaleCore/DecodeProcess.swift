@@ -17,7 +17,8 @@ public final class DecodeProcess {
         ffmpeg: URL,
         input: URL,
         media: MediaInfo,
-        format: RawFrameFormat = .bgra
+        format: RawFrameFormat = .bgra,
+        hardwareDecode: Bool = true
     ) {
         self.format = format
         self.width = media.video.width
@@ -25,7 +26,9 @@ public final class DecodeProcess {
         self.process = FFmpegProcess(
             label: "ffmpeg (decode)",
             executable: ffmpeg,
-            arguments: DecodeProcess.arguments(input: input, media: media, format: format),
+            arguments: DecodeProcess.arguments(
+                input: input, media: media, format: format, hardwareDecode: hardwareDecode
+            ),
             standardInput: .null,
             standardOutput: .pipe
         )
@@ -34,11 +37,17 @@ public final class DecodeProcess {
     public static func arguments(
         input: URL,
         media: MediaInfo,
-        format: RawFrameFormat
+        format: RawFrameFormat,
+        hardwareDecode: Bool = true
     ) -> [String] {
         [
             "-nostdin",
             "-v", "error",
+        ]
+        + (usesHardwareDecode(hardwareDecode, codec: media.video.codec)
+            ? ["-hwaccel", "videotoolbox"]
+            : [])
+        + [
             "-i", input.path,
             "-map", "0:v:0",
             // Normalise to constant frame rate at the stream's nominal rate. The encode
@@ -50,6 +59,18 @@ public final class DecodeProcess {
             "-pix_fmt", format.ffmpegName,
             "pipe:1",
         ]
+    }
+
+    /// Codecs the media engine decodes on every Apple Silicon Mac.
+    ///
+    /// AV1 and VP9 are hardware-decodable only on newer chips, and ffmpeg does *not*
+    /// fall back for them: `-hwaccel videotoolbox` on an AV1 source aborts the decode
+    /// with a VideoToolbox error, which would fail the job. Anything outside this set
+    /// therefore stays on the software decoder.
+    public static let hardwareDecodableCodecs: Set<String> = ["h264", "hevc", "prores"]
+
+    static func usesHardwareDecode(_ requested: Bool, codec: String) -> Bool {
+        requested && hardwareDecodableCodecs.contains(codec.lowercased())
     }
 
     public func start() throws { try process.start() }

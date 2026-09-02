@@ -240,6 +240,67 @@ final class UpscaleJobTests: XCTestCase {
         )
     }
 
+    /// The writer runs on its own thread now, and most of its time is spent blocked in
+    /// the pipe write. A cancel arriving then must still unblock it and tear both
+    /// subprocesses down.
+    func testCancelWhileTheWriterIsBlockedStillStops() throws {
+        let (tools, device) = try requireEnvironment()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        // A cheap preset at 4x makes the encoder, not the GPU, the bottleneck, so the
+        // consumer thread is almost certainly inside `write` when the cancel lands.
+        let fixture = try TestSupport.makeFixture(
+            TestSupport.FixtureSpec(width: 640, height: 480, durationSeconds: 30),
+            in: directory
+        )
+        let output = directory.appendingPathComponent("cancelled-writer.mkv")
+        let job = UpscaleJob(
+            input: fixture,
+            settings: UpscaleJobSettings(
+                preset: try XCTUnwrap(Preset.preset(id: "mode-a-fast")),
+                scale: 4,
+                output: output
+            ),
+            tools: tools,
+            device: device
+        )
+
+        let started = expectation(description: "processing started")
+        let finished = expectation(description: "run returned")
+        var thrown: Error?
+        var hasFulfilledStart = false
+
+        DispatchQueue.global().async {
+            do {
+                try job.run { progress in
+                    if progress.phase == .processing, progress.framesProcessed >= 4,
+                       !hasFulfilledStart {
+                        hasFulfilledStart = true
+                        started.fulfill()
+                    }
+                }
+            } catch {
+                thrown = error
+            }
+            finished.fulfill()
+        }
+
+        wait(for: [started], timeout: 120)
+        job.cancel()
+        wait(for: [finished], timeout: 60)
+
+        XCTAssertTrue(thrown is UpscaleCancelled, "expected UpscaleCancelled, got \(thrown as Any)")
+        let survivors = try ProcessRunner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/pgrep"),
+            arguments: ["-f", fixture.path]
+        )
+        XCTAssertEqual(
+            survivors.terminationStatus, 1,
+            "orphaned processes: \(survivors.standardOutput)"
+        )
+    }
+
     func testDefaultOutputURLSitsBesideTheInput() {
         let input = URL(fileURLWithPath: "/videos/Episode 01.mkv")
         let output = UpscaleJobSettings.defaultOutputURL(for: input, scale: 2)

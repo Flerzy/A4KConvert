@@ -100,6 +100,59 @@ final class PassthroughIntegrationTests: XCTestCase {
         XCTAssertEqual(kill(identifier, 0), -1)
     }
 
+    /// The pipeline decodes on VideoToolbox. Both decoders are conformant, so the raw
+    /// frames have to be identical; anything else would mean the golden tests and the
+    /// hardware path disagree about what the source looks like.
+    func testHardwareDecodeMatchesSoftwareDecodeByteForByte() throws {
+        let tools = try TestSupport.requireTools()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var spec = TestSupport.FixtureSpec(width: 320, height: 240, durationSeconds: 1.0)
+        spec.includeAudio = false
+        spec.includeSubtitles = false
+        // ultrafast produces a stream both decoders take the fast path on; the default
+        // fixture settings are what every other test decodes too.
+        let fixture = try TestSupport.makeFixture(spec, in: directory)
+        let media = try Probe(tools: tools).probe(url: fixture)
+
+        func decodeAll(hardware: Bool) throws -> [Data] {
+            let decode = DecodeProcess(
+                ffmpeg: tools.ffmpeg, input: fixture, media: media, hardwareDecode: hardware
+            )
+            try decode.start()
+            let reader = FrameReader(
+                handle: try XCTUnwrap(decode.outputHandle),
+                frameByteCount: decode.frameByteCount
+            )
+            var frames: [Data] = []
+            while let frame = try reader.readFrame() { frames.append(frame) }
+            reader.close()
+            try decode.waitAndCheck()
+            return frames
+        }
+
+        let hardware = try decodeAll(hardware: true)
+        let software = try decodeAll(hardware: false)
+        XCTAssertGreaterThan(hardware.count, 0)
+        XCTAssertEqual(hardware.count, software.count)
+        for (index, pair) in zip(hardware, software).enumerated() {
+            XCTAssertEqual(pair.0, pair.1, "frame \(index) differs between the decoders")
+        }
+    }
+
+    /// AV1 through `-hwaccel videotoolbox` fails outright on chips without an AV1
+    /// decoder, so the flag is only spelled for the codecs that always work.
+    func testHardwareDecodeIsOnlyRequestedForCodecsThatSupportIt() {
+        XCTAssertTrue(DecodeProcess.usesHardwareDecode(true, codec: "h264"))
+        XCTAssertTrue(DecodeProcess.usesHardwareDecode(true, codec: "HEVC"))
+        XCTAssertTrue(DecodeProcess.usesHardwareDecode(true, codec: "prores"))
+        XCTAssertFalse(DecodeProcess.usesHardwareDecode(true, codec: "av1"))
+        XCTAssertFalse(DecodeProcess.usesHardwareDecode(true, codec: "vp9"))
+        XCTAssertFalse(DecodeProcess.usesHardwareDecode(true, codec: "mpeg4"))
+        XCTAssertFalse(DecodeProcess.usesHardwareDecode(false, codec: "h264"))
+    }
+
     func testEncodeFailureSurfacesFFmpegMessage() throws {
         let tools = try TestSupport.requireTools()
         let directory = try TestSupport.makeTemporaryDirectory()

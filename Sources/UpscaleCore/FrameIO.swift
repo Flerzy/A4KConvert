@@ -78,22 +78,29 @@ public final class FrameWriter {
 
     public func write(frame: Data) throws {
         try frame.withUnsafeBytes { raw in
-            var offset = 0
-            while offset < raw.count {
-                let count = Darwin.write(fileDescriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset)
-                if count > 0 {
-                    offset += count
-                    continue
-                }
-                if count < 0, errno == EINTR { continue }
-                throw UpscaleError.processFailed(
-                    tool: "frame writer",
-                    status: Int32(errno),
-                    stderr: count < 0
-                        ? String(cString: strerror(errno))
-                        : "encoder closed its input after \(framesWritten) frames"
-                )
+            try write(bytes: raw)
+        }
+    }
+
+    /// Writes one frame from a caller-owned buffer, so the hot path allocates nothing.
+    public func write(bytes raw: UnsafeRawBufferPointer) throws {
+        var offset = 0
+        while offset < raw.count {
+            let count = Darwin.write(
+                fileDescriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset
+            )
+            if count > 0 {
+                offset += count
+                continue
             }
+            if count < 0, errno == EINTR { continue }
+            throw UpscaleError.processFailed(
+                tool: "frame writer",
+                status: Int32(errno),
+                stderr: count < 0
+                    ? String(cString: strerror(errno))
+                    : "encoder closed its input after \(framesWritten) frames"
+            )
         }
         framesWritten += 1
     }

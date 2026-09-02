@@ -174,11 +174,103 @@ public final class UpscaleJob: @unchecked Sendable {
 
     // MARK: - Pipeline
 
+    /// The textures and the readback buffer one in-flight frame owns.
+    ///
+    /// A slot moves producer → consumer → free list and back, so only one thread ever
+    /// touches it; that is what lets the readback buffer be reused with no locking.
+    private final class FrameSlot {
+        let inputTexture: MTLTexture
+        let outputTexture: MTLTexture
+        var buffer: [UInt8]
+
+        init(inputTexture: MTLTexture, outputTexture: MTLTexture, byteCount: Int) {
+            self.inputTexture = inputTexture
+            self.outputTexture = outputTexture
+            self.buffer = [UInt8](repeating: 0, count: byteCount)
+        }
+    }
+
     /// One frame handed to the GPU and not yet written out.
     private struct InFlightFrame {
         let commandBuffer: MTLCommandBuffer
-        let inputTexture: MTLTexture
-        let outputTexture: MTLTexture
+        let slot: FrameSlot
+        let wasPassedThrough: Bool
+    }
+
+    /// Hands frames from the producer thread to the consumer thread, and free slots
+    /// back the other way.
+    ///
+    /// The free list is what bounds the pipeline: a producer can only start a frame
+    /// once the consumer has released a slot, so memory stays flat at
+    /// `inFlightFrameLimit` slots. Both directions share one condition, so a failure on
+    /// either side wakes whatever the other side is blocked on.
+    private final class FrameChannel {
+        private let condition = NSCondition()
+        private var ready: [InFlightFrame] = []
+        private var free: [FrameSlot]
+        private var producerFinished = false
+        private var failure: Error?
+
+        init(slots: [FrameSlot]) {
+            self.free = slots
+        }
+
+        /// Blocks until a slot is free. Throws once either side has failed.
+        func takeSlot() throws -> FrameSlot {
+            condition.lock()
+            defer { condition.unlock() }
+            while free.isEmpty, failure == nil {
+                condition.wait()
+            }
+            if let failure { throw failure }
+            return free.removeLast()
+        }
+
+        func submit(_ frame: InFlightFrame) {
+            condition.lock()
+            ready.append(frame)
+            condition.signal()
+            condition.unlock()
+        }
+
+        /// Blocks until a frame is ready; nil once the producer has finished cleanly.
+        func nextFrame() throws -> InFlightFrame? {
+            condition.lock()
+            defer { condition.unlock() }
+            while ready.isEmpty, !producerFinished, failure == nil {
+                condition.wait()
+            }
+            if let failure { throw failure }
+            return ready.isEmpty ? nil : ready.removeFirst()
+        }
+
+        func release(_ slot: FrameSlot) {
+            condition.lock()
+            free.append(slot)
+            condition.signal()
+            condition.unlock()
+        }
+
+        func finish() {
+            condition.lock()
+            producerFinished = true
+            condition.broadcast()
+            condition.unlock()
+        }
+
+        /// Records the first failure and wakes both sides.
+        func fail(_ error: Error) {
+            condition.lock()
+            if failure == nil { failure = error }
+            condition.broadcast()
+            condition.unlock()
+        }
+
+        var hasFailed: Bool {
+            condition.lock()
+            defer { condition.unlock() }
+            return failure != nil
+        }
     }
 
     private func runPipeline(
@@ -203,26 +295,27 @@ public final class UpscaleJob: @unchecked Sendable {
         let writer = FrameWriter(handle: try require(encode.inputHandle, "encoder stdin"))
 
         // Preallocated once: the job does no per-frame allocation after this point.
-        var freeInputTextures: [MTLTexture] = []
-        var freeOutputTextures: [MTLTexture] = []
+        let outputByteCount = RawFrameFormat.bgra.frameByteCount(
+            width: targetSize.width, height: targetSize.height
+        )
+        var slots: [FrameSlot] = []
         for _ in 0..<UpscaleJob.inFlightFrameLimit {
-            freeInputTextures.append(
-                try FrameTextures.makeTexture(
-                    device: device, width: inputSize.width, height: inputSize.height
-                )
-            )
-            freeOutputTextures.append(
-                try FrameTextures.makeTexture(
-                    device: device, width: targetSize.width, height: targetSize.height
+            slots.append(
+                FrameSlot(
+                    inputTexture: try FrameTextures.makeTexture(
+                        device: device, width: inputSize.width, height: inputSize.height
+                    ),
+                    outputTexture: try FrameTextures.makeTexture(
+                        device: device, width: targetSize.width, height: targetSize.height
+                    ),
+                    byteCount: outputByteCount
                 )
             )
         }
 
-        var inFlight: [InFlightFrame] = []
-        var reachedEndOfStream = false
         var closedPipes = false
-        var framesPassedThrough = 0
         let totalFrames = media.estimatedFrameCount
+        let channel = FrameChannel(slots: slots)
 
         /// Closes our ends of both pipes exactly once.
         func closePipes() {
@@ -233,8 +326,10 @@ public final class UpscaleJob: @unchecked Sendable {
         }
 
         // A 30-minute source is tens of thousands of frames; a progress bar cannot show
-        // more than a few updates a second, so coalesce them.
+        // more than a few updates a second, so coalesce them. Called on the consumer
+        // thread, which is the only side that knows how many frames are out.
         var lastReport = Date.distantPast
+        var framesPassedThrough = 0
         func report(force: Bool = false) {
             let now = Date()
             guard force || now.timeIntervalSince(lastReport) >= UpscaleJob.progressInterval else {
@@ -252,70 +347,75 @@ public final class UpscaleJob: @unchecked Sendable {
             ))
         }
 
-        do {
-        while true {
-            try checkCancelled()
+        // The consumer drains the GPU and feeds the encoder while the producer is
+        // already reading and committing the next frames; without the split, the GPU
+        // sat idle for the length of every pipe write.
+        let consumerFinished = DispatchSemaphore(value: 0)
+        let consumer = Thread {
+            defer { consumerFinished.signal() }
+            do {
+                while let frame = try channel.nextFrame() {
+                    frame.commandBuffer.waitUntilCompleted()
+                    if let error = frame.commandBuffer.error { throw error }
+                    try self.checkCancelled()
+                    try frame.slot.buffer.withUnsafeMutableBytes { buffer in
+                        try FrameTextures.readback(from: frame.slot.outputTexture, into: buffer)
+                        try writer.write(bytes: UnsafeRawBufferPointer(buffer))
+                    }
+                    if frame.wasPassedThrough { framesPassedThrough += 1 }
+                    channel.release(frame.slot)
+                    report()
+                }
+            } catch {
+                channel.fail(error)
+            }
+        }
+        consumer.name = "upscale.frame-writer"
+        consumer.stackSize = 512 * 1024
+        consumer.start()
 
-            // Fill the pipeline: reading and uploading frame N+1 overlaps the GPU work
-            // still running for the frames already committed.
-            while !reachedEndOfStream, inFlight.count < UpscaleJob.inFlightFrameLimit {
+        do {
+            while true {
+                try checkCancelled()
                 // The decode side is constant frame rate, so the count of frames read so
                 // far is the index of the one about to be read.
                 let frameIndex = reader.framesRead
+                // Blocks until the consumer has released a slot, which is what bounds
+                // the pipeline.
+                let slot = try channel.takeSlot()
                 guard let frame = try reader.readFrame() else {
-                    reachedEndOfStream = true
+                    channel.release(slot)
                     break
                 }
-                guard let inputTexture = freeInputTextures.popLast(),
-                      let outputTexture = freeOutputTextures.popLast()
-                else {
-                    throw EngineError.textureAllocationFailed(
-                        width: inputSize.width, height: inputSize.height
-                    )
-                }
-                try FrameTextures.upload(frame, to: inputTexture)
+                try FrameTextures.upload(frame, to: slot.inputTexture)
 
                 guard let commandBuffer = commandQueue.makeCommandBuffer() else {
                     throw EngineError.noMetalDevice
                 }
-                if skipPlan.isSkipped(frame: frameIndex) {
+                let isSkipped = skipPlan.isSkipped(frame: frameIndex)
+                if isSkipped {
                     try engine.encodePassthrough(
                         commandBuffer: commandBuffer,
-                        input: inputTexture,
-                        output: outputTexture
+                        input: slot.inputTexture,
+                        output: slot.outputTexture
                     )
-                    framesPassedThrough += 1
                 } else {
                     try engine.encode(
                         commandBuffer: commandBuffer,
-                        input: inputTexture,
-                        output: outputTexture
+                        input: slot.inputTexture,
+                        output: slot.outputTexture
                     )
                 }
                 commandBuffer.commit()
-                inFlight.append(
+                channel.submit(
                     InFlightFrame(
-                        commandBuffer: commandBuffer,
-                        inputTexture: inputTexture,
-                        outputTexture: outputTexture
+                        commandBuffer: commandBuffer, slot: slot, wasPassedThrough: isSkipped
                     )
                 )
             }
-
-            guard !inFlight.isEmpty else { break }
-
-            let frame = inFlight.removeFirst()
-            frame.commandBuffer.waitUntilCompleted()
-            if let error = frame.commandBuffer.error {
-                throw error
-            }
-            try checkCancelled()
-            try writer.write(frame: FrameTextures.readback(from: frame.outputTexture))
-            freeInputTextures.append(frame.inputTexture)
-            freeOutputTextures.append(frame.outputTexture)
-            report()
-        }
         } catch {
+            channel.fail(error)
+            consumerFinished.wait()
             closePipes()
             // A cancelled job kills ffmpeg, which shows up here as a truncated read or
             // a closed pipe. The cancellation is the real cause, so report that.
@@ -324,6 +424,22 @@ public final class UpscaleJob: @unchecked Sendable {
             // already failed, and its message says far more than "EPIPE" does.
             try reportSubprocessFailure(decode: decode, encode: encode)
             throw error
+        }
+
+        channel.finish()
+        consumerFinished.wait()
+
+        // The consumer stops on its own error too, and that error has to surface as the
+        // job's failure rather than as a frame-count mismatch.
+        if channel.hasFailed {
+            do {
+                _ = try channel.takeSlot()
+            } catch {
+                closePipes()
+                if cancelled { throw UpscaleCancelled() }
+                try reportSubprocessFailure(decode: decode, encode: encode)
+                throw error
+            }
         }
 
         // The throttle may have swallowed the last few frames' updates.
