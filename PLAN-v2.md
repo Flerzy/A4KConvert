@@ -292,7 +292,25 @@ title=OP
 
 ---
 
-## WP9 — In-process pipeline cache
+## WP9 — In-process pipeline cache — **measured, not needed**
+
+Measurement first, per the stop rule below. `UPSCALE_BENCHMARK=1 swift test --filter
+testReportsRepeatedConfigureCost` on the development machine, Mode A+A HQ, 1080p→4K,
+three engines in one process:
+
+```
+parse:     27 / 26 / 26 ms
+configure:  9 /  3 /  2 ms
+```
+
+The second `configure` costs 3 ms, two orders of magnitude under the 300 ms threshold —
+macOS's own on-disk shader cache already absorbs the repeat, and the residual start-up
+cost is GLSL parsing, not pipeline compilation. The cache is therefore not built. The
+benchmark stays in `EngineBenchmarkTests` so the decision can be rechecked.
+
+<details>
+<summary>Original brief</summary>
+
 
 "Compiling shaders…" costs seconds per job for the HQ presets, and a batch of
 episodes usually shares preset and frame size. Cache compiled pipelines across jobs
@@ -320,6 +338,8 @@ within one app session.
   `configure` with equal key performs zero `makeLibrary` calls (count via an injected
   hook or by asserting the cache's `hitCount`).
 - Benchmark numbers in the PR; `swift test` green.
+
+</details>
 
 ---
 

@@ -7,6 +7,43 @@ import XCTest
 ///
 /// Run with `UPSCALE_BENCHMARK=1 swift test --filter EngineBenchmarkTests`.
 final class EngineBenchmarkTests: XCTestCase {
+    /// What a second job with the same preset and frame size pays to start.
+    ///
+    /// This is the measurement WP9's pipeline cache would have to beat: if macOS's own
+    /// on-disk shader cache already makes the repeat cheap, an in-process cache buys
+    /// nothing.
+    func testReportsRepeatedConfigureCost() throws {
+        guard ProcessInfo.processInfo.environment["UPSCALE_BENCHMARK"] == "1" else {
+            throw XCTSkip("Set UPSCALE_BENCHMARK=1 to run the configure benchmark.")
+        }
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("No Metal device available.")
+        }
+
+        let input = PixelSize(width: 1920, height: 1080)
+        let target = PixelSize(width: 3840, height: 2160)
+        let preset = try XCTUnwrap(Preset.preset(id: "mode-aa-hq"))
+
+        var parseTimings: [Double] = []
+        var configureTimings: [Double] = []
+        for _ in 0..<3 {
+            let parseStart = Date()
+            let engine = try Anime4KEngine(preset: preset, device: device)
+            parseTimings.append(Date().timeIntervalSince(parseStart) * 1000)
+            let start = Date()
+            try engine.configure(inputSize: input, targetSize: target)
+            configureTimings.append(Date().timeIntervalSince(start) * 1000)
+        }
+        print(String(
+            format: "%@ 1080p->4K start-up cost, three engines in one process:\n"
+                + "  parse:     %.0f / %.0f / %.0f ms\n"
+                + "  configure: %.0f / %.0f / %.0f ms",
+            preset.name,
+            parseTimings[0], parseTimings[1], parseTimings[2],
+            configureTimings[0], configureTimings[1], configureTimings[2]
+        ))
+    }
+
     func testReports1080pToFourKThroughput() throws {
         guard ProcessInfo.processInfo.environment["UPSCALE_BENCHMARK"] == "1" else {
             throw XCTSkip("Set UPSCALE_BENCHMARK=1 to run the throughput benchmark.")
