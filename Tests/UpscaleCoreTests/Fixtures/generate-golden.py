@@ -1,6 +1,7 @@
 import json, os, socket, subprocess, sys, time
 
-shader_dir = "/Users/redacted/Developer/upscale/Sources/UpscaleCore/Resources/Shaders"
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+shader_dir = os.path.join(repo_root, "Sources", "UpscaleCore", "Resources", "Shaders")
 files = sys.argv[1].split(",")
 src = sys.argv[2]
 out_name = sys.argv[3]
