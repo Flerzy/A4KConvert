@@ -46,6 +46,110 @@ public enum FrameTextures {
         }
     }
 
+    /// The three planes of one 4:2:0 frame, as single-channel textures.
+    ///
+    /// Chroma is half size in both directions, so the pipe carries 1.5 bytes per pixel
+    /// instead of BGRA's four.
+    public struct YUVPlanes {
+        public let luma: MTLTexture
+        public let chromaBlue: MTLTexture
+        public let chromaRed: MTLTexture
+
+        public init(luma: MTLTexture, chromaBlue: MTLTexture, chromaRed: MTLTexture) {
+            self.luma = luma
+            self.chromaBlue = chromaBlue
+            self.chromaRed = chromaRed
+        }
+
+        public var width: Int { luma.width }
+        public var height: Int { luma.height }
+    }
+
+    public static let planePixelFormat: MTLPixelFormat = .r8Unorm
+
+    public static func makePlanes(
+        device: MTLDevice,
+        width: Int,
+        height: Int,
+        format: RawFrameFormat = .yuv420p
+    ) throws -> YUVPlanes {
+        let planes = format.planeLayout(width: width, height: height)
+        guard planes.count == 3 else {
+            throw EngineError.sizeMismatch(expected: "three planes", got: "\(planes.count)")
+        }
+        func make(_ plane: RawFrameFormat.Plane) throws -> MTLTexture {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: planePixelFormat,
+                width: plane.width,
+                height: plane.height,
+                mipmapped: false
+            )
+            descriptor.usage = [.shaderRead, .shaderWrite]
+            descriptor.storageMode = .shared
+            guard let texture = device.makeTexture(descriptor: descriptor) else {
+                throw EngineError.textureAllocationFailed(
+                    width: plane.width, height: plane.height
+                )
+            }
+            return texture
+        }
+        return YUVPlanes(
+            luma: try make(planes[0]),
+            chromaBlue: try make(planes[1]),
+            chromaRed: try make(planes[2])
+        )
+    }
+
+    /// Splits one contiguous planar frame off the pipe into the three plane textures.
+    public static func upload(
+        planar frame: Data,
+        to planes: YUVPlanes,
+        format: RawFrameFormat = .yuv420p
+    ) throws {
+        let layout = format.planeLayout(width: planes.width, height: planes.height)
+        let expected = layout.reduce(0) { $0 + $1.byteCount }
+        guard frame.count == expected else {
+            throw EngineError.sizeMismatch(
+                expected: "\(expected) bytes", got: "\(frame.count) bytes"
+            )
+        }
+        let textures = [planes.luma, planes.chromaBlue, planes.chromaRed]
+        frame.withUnsafeBytes { raw in
+            for (plane, texture) in zip(layout, textures) {
+                texture.replace(
+                    region: MTLRegionMake2D(0, 0, texture.width, texture.height),
+                    mipmapLevel: 0,
+                    withBytes: raw.baseAddress!.advanced(by: plane.offset),
+                    bytesPerRow: plane.bytesPerRow
+                )
+            }
+        }
+    }
+
+    /// Packs the three plane textures back into one contiguous frame for the pipe.
+    public static func readback(
+        planes: YUVPlanes,
+        into buffer: UnsafeMutableRawBufferPointer,
+        format: RawFrameFormat = .yuv420p
+    ) throws {
+        let layout = format.planeLayout(width: planes.width, height: planes.height)
+        let expected = layout.reduce(0) { $0 + $1.byteCount }
+        guard buffer.count == expected else {
+            throw EngineError.sizeMismatch(
+                expected: "\(expected) bytes", got: "\(buffer.count) bytes"
+            )
+        }
+        let textures = [planes.luma, planes.chromaBlue, planes.chromaRed]
+        for (plane, texture) in zip(layout, textures) {
+            texture.getBytes(
+                buffer.baseAddress!.advanced(by: plane.offset),
+                bytesPerRow: plane.bytesPerRow,
+                from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+                mipmapLevel: 0
+            )
+        }
+    }
+
     /// Copies a frame into a caller-owned buffer, which the job reuses across frames.
     public static func readback(
         from texture: MTLTexture,

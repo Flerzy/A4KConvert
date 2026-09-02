@@ -185,7 +185,11 @@ public final class EncodeProcess {
     }
 
     static func videoFilter(for plan: EncodePlan) -> String {
-        var stages = [plan.color.rgbToYUVFilter(pixelFormat: plan.settings.encoder.encodePixelFormat)]
+        // Planar frames arrive in the encoder's own format, converted in Metal with the
+        // source's matrix and range, so there is nothing left for the scaler to do.
+        var stages: [String] = plan.format.isPlanar
+            ? []
+            : [plan.color.rgbToYUVFilter(pixelFormat: plan.settings.encoder.encodePixelFormat)]
         let sar = plan.sampleAspectRatio.reduced
         if sar.numerator > 0, sar.denominator > 0 {
             stages.append("setsar=\(sar.numerator)/\(sar.denominator)")

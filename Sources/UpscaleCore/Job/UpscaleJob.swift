@@ -111,7 +111,7 @@ public final class UpscaleJob: @unchecked Sendable {
             scale: settings.scale,
             settings: settings.encoder,
             container: container,
-            format: .bgra
+            format: .yuv420p
         )
         try EncodeProcess.validate(plan)
 
@@ -125,14 +125,18 @@ public final class UpscaleJob: @unchecked Sendable {
         let engine = try Anime4KEngine(preset: settings.preset, device: device, catalog: catalog)
         let inputSize = PixelSize(width: media.video.width, height: media.video.height)
         let targetSize = PixelSize(width: plan.width, height: plan.height)
-        try engine.configure(inputSize: inputSize, targetSize: targetSize)
+        try engine.configure(
+            inputSize: inputSize, targetSize: targetSize, color: plan.color
+        )
         try checkCancelled()
 
         guard let commandQueue = device.makeCommandQueue() else {
             throw EngineError.noMetalDevice
         }
 
-        let decode = DecodeProcess(ffmpeg: tools.ffmpeg, input: input, media: media, format: .bgra)
+        let decode = DecodeProcess(
+            ffmpeg: tools.ffmpeg, input: input, media: media, format: .yuv420p
+        )
         let encode = EncodeProcess(
             ffmpeg: tools.ffmpeg,
             source: input,
@@ -179,13 +183,13 @@ public final class UpscaleJob: @unchecked Sendable {
     /// A slot moves producer → consumer → free list and back, so only one thread ever
     /// touches it; that is what lets the readback buffer be reused with no locking.
     private final class FrameSlot {
-        let inputTexture: MTLTexture
-        let outputTexture: MTLTexture
+        let input: FrameTextures.YUVPlanes
+        let output: FrameTextures.YUVPlanes
         var buffer: [UInt8]
 
-        init(inputTexture: MTLTexture, outputTexture: MTLTexture, byteCount: Int) {
-            self.inputTexture = inputTexture
-            self.outputTexture = outputTexture
+        init(input: FrameTextures.YUVPlanes, output: FrameTextures.YUVPlanes, byteCount: Int) {
+            self.input = input
+            self.output = output
             self.buffer = [UInt8](repeating: 0, count: byteCount)
         }
     }
@@ -295,17 +299,17 @@ public final class UpscaleJob: @unchecked Sendable {
         let writer = FrameWriter(handle: try require(encode.inputHandle, "encoder stdin"))
 
         // Preallocated once: the job does no per-frame allocation after this point.
-        let outputByteCount = RawFrameFormat.bgra.frameByteCount(
+        let outputByteCount = RawFrameFormat.yuv420p.frameByteCount(
             width: targetSize.width, height: targetSize.height
         )
         var slots: [FrameSlot] = []
         for _ in 0..<UpscaleJob.inFlightFrameLimit {
             slots.append(
                 FrameSlot(
-                    inputTexture: try FrameTextures.makeTexture(
+                    input: try FrameTextures.makePlanes(
                         device: device, width: inputSize.width, height: inputSize.height
                     ),
-                    outputTexture: try FrameTextures.makeTexture(
+                    output: try FrameTextures.makePlanes(
                         device: device, width: targetSize.width, height: targetSize.height
                     ),
                     byteCount: outputByteCount
@@ -359,7 +363,7 @@ public final class UpscaleJob: @unchecked Sendable {
                     if let error = frame.commandBuffer.error { throw error }
                     try self.checkCancelled()
                     try frame.slot.buffer.withUnsafeMutableBytes { buffer in
-                        try FrameTextures.readback(from: frame.slot.outputTexture, into: buffer)
+                        try FrameTextures.readback(planes: frame.slot.output, into: buffer)
                         try writer.write(bytes: UnsafeRawBufferPointer(buffer))
                     }
                     if frame.wasPassedThrough { framesPassedThrough += 1 }
@@ -387,7 +391,7 @@ public final class UpscaleJob: @unchecked Sendable {
                     channel.release(slot)
                     break
                 }
-                try FrameTextures.upload(frame, to: slot.inputTexture)
+                try FrameTextures.upload(planar: frame, to: slot.input)
 
                 guard let commandBuffer = commandQueue.makeCommandBuffer() else {
                     throw EngineError.noMetalDevice
@@ -396,14 +400,14 @@ public final class UpscaleJob: @unchecked Sendable {
                 if isSkipped {
                     try engine.encodePassthrough(
                         commandBuffer: commandBuffer,
-                        input: slot.inputTexture,
-                        output: slot.outputTexture
+                        input: slot.input,
+                        output: slot.output
                     )
                 } else {
                     try engine.encode(
                         commandBuffer: commandBuffer,
-                        input: slot.inputTexture,
-                        output: slot.outputTexture
+                        input: slot.input,
+                        output: slot.output
                     )
                 }
                 commandBuffer.commit()

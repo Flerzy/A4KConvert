@@ -2,21 +2,75 @@ import Foundation
 
 /// The raw pixel layout carried over the pipes between ffmpeg and Metal.
 ///
-/// v1 uses `bgra` only: it maps 1:1 onto `MTLPixelFormat.bgra8Unorm`, so no manual
-/// YUV plane handling is needed. If the pipe ever becomes the bottleneck, the input
-/// side moves to `yuv420p` with the conversion done as a Metal pass.
+/// The job runs `yuv420p`: at 4K that is 12 MB a frame instead of the 33 MB packed BGRA
+/// costs, and the colour conversion happens in Metal at both ends. `bgra` stays for the
+/// RGB-in/RGB-out paths — the golden tests and the preview — where a packed frame is
+/// what the caller already has.
 public struct RawFrameFormat: Equatable, Sendable {
-    /// The name ffmpeg knows it by, for `-pix_fmt`.
-    public let ffmpegName: String
-    public let bytesPerPixel: Int
-
-    public static let bgra = RawFrameFormat(ffmpegName: "bgra", bytesPerPixel: 4)
-
-    public func frameByteCount(width: Int, height: Int) -> Int {
-        width * height * bytesPerPixel
+    public enum Layout: Equatable, Sendable {
+        /// One interleaved plane of `bytesPerPixel` bytes per pixel.
+        case packed(bytesPerPixel: Int)
+        /// Y at full size, then Cb and Cr at half width and half height.
+        case planar420(bytesPerSample: Int)
     }
 
-    public func bytesPerRow(width: Int) -> Int {
-        width * bytesPerPixel
+    /// One plane's position in the contiguous frame buffer.
+    public struct Plane: Equatable, Sendable {
+        public let offset: Int
+        public let width: Int
+        public let height: Int
+        public let bytesPerRow: Int
+        public var byteCount: Int { bytesPerRow * height }
+    }
+
+    /// The name ffmpeg knows it by, for `-pix_fmt`.
+    public let ffmpegName: String
+    public let layout: Layout
+
+    public static let bgra = RawFrameFormat(ffmpegName: "bgra", layout: .packed(bytesPerPixel: 4))
+    public static let yuv420p = RawFrameFormat(
+        ffmpegName: "yuv420p", layout: .planar420(bytesPerSample: 1)
+    )
+
+    public var isPlanar: Bool {
+        if case .planar420 = layout { return true }
+        return false
+    }
+
+    public func frameByteCount(width: Int, height: Int) -> Int {
+        planeLayout(width: width, height: height).reduce(0) { $0 + $1.byteCount }
+    }
+
+    /// Where each plane sits in one frame's bytes.
+    ///
+    /// ffmpeg writes rawvideo planes tightly packed with no row padding, so a plane's
+    /// stride is its own width times the sample size.
+    public func planeLayout(width: Int, height: Int) -> [Plane] {
+        switch layout {
+        case let .packed(bytesPerPixel):
+            return [
+                Plane(
+                    offset: 0, width: width, height: height,
+                    bytesPerRow: width * bytesPerPixel
+                )
+            ]
+        case let .planar420(bytesPerSample):
+            // Chroma is half resolution in both directions, rounded up so an odd size
+            // still describes every sample ffmpeg writes.
+            let chromaWidth = (width + 1) / 2
+            let chromaHeight = (height + 1) / 2
+            let luma = Plane(
+                offset: 0, width: width, height: height, bytesPerRow: width * bytesPerSample
+            )
+            let cb = Plane(
+                offset: luma.byteCount, width: chromaWidth, height: chromaHeight,
+                bytesPerRow: chromaWidth * bytesPerSample
+            )
+            let cr = Plane(
+                offset: cb.offset + cb.byteCount, width: chromaWidth, height: chromaHeight,
+                bytesPerRow: chromaWidth * bytesPerSample
+            )
+            return [luma, cb, cr]
+        }
     }
 }

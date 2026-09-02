@@ -46,13 +46,15 @@ duration and A/V drift on each output. `docs/manual-test.md` covers the UI.
 ## How it works
 
 ```
-input.mkv → ffmpeg (decode to raw bgra) → Metal: Anime4K passes → ffmpeg (encode + mux) → output.mkv
+input.mkv → ffmpeg (decode to raw yuv420p) → Metal: YUV→RGB, Anime4K passes, RGB→YUV
+          → ffmpeg (encode + mux) → output.mkv
 ```
 
 Two ffmpeg subprocesses are connected to the app by pipes; the app never links libav*.
-Frames cross as raw `bgra`, which maps 1:1 onto `MTLPixelFormat.bgra8Unorm`. Decoding
-uses VideoToolbox where the codec allows it, and ffmpeg falls back to software
-otherwise.
+Frames cross as planar `yuv420p` — 1.5 bytes per pixel instead of BGRA's four — and the
+colour conversion happens in Metal at both ends, using the source's own matrix and
+range. Decoding uses VideoToolbox where the codec allows it, and ffmpeg falls back to
+software otherwise.
 
 The job runs two threads over a fixed set of frame slots: one reads and commits work to
 the GPU, the other waits on each command buffer, reads the frame back and writes it to
