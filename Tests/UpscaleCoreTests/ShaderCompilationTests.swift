@@ -36,9 +36,10 @@ final class ShaderCompilationTests: XCTestCase {
             }
         }
 
-        // The four presets between them reference nine files; a silent resource-loading
-        // regression would show up here as a much smaller number.
-        XCTAssertEqual(Preset.allShaderFiles.count, 9)
+        // The twelve presets between them reference fourteen files; a silent
+        // resource-loading regression would show up here as a much smaller number.
+        XCTAssertEqual(Preset.allShaderFiles.count, 14)
+        XCTAssertEqual(Preset.all.count, 12)
         XCTAssertGreaterThan(stageCount, 50)
     }
 

@@ -38,7 +38,8 @@ Work through this list after any change to `App/Upscale/` or to `JobQueue`.
 
 On a queued row:
 
-1. Set **Preset** to `Mode A+A (HQ)`.
+1. Open **Preset**: the twelve modes are grouped under **Fast** and **HQ**, and
+   hovering the picker shows what the selected mode is for. Set it to `Mode A+A (HQ)`.
 2. Set **Scale** to `4x`. The summary updates to `854x480 → 3416x1920`.
 3. Set **Encoder** to `H.264 (VideoToolbox)`, then back to HEVC.
 4. Drag **Quality** and confirm the number above the slider tracks it.

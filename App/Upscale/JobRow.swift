@@ -75,11 +75,16 @@ struct JobRow: View {
     private var settings: some View {
         HStack(spacing: 12) {
             Picker("Preset", selection: presetBinding) {
-                ForEach(Preset.all) { preset in
-                    Text(preset.name).tag(preset)
+                ForEach(Preset.Tier.allCases, id: \.self) { tier in
+                    Section(tier.displayName) {
+                        ForEach(Preset.presets(tier: tier)) { preset in
+                            Text(preset.name).tag(preset)
+                        }
+                    }
                 }
             }
             .frame(maxWidth: 190)
+            .help(job.settings.preset.summary)
 
             Picker("Scale", selection: scaleBinding) {
                 Text("2x").tag(2)

@@ -69,7 +69,8 @@ absolute difference of about 0.01/255 — see `Anime4KEngineTests`.
 
 ## Scope of v1
 
-- Presets: Anime4K Mode A and Mode A+A, each in a Fast and an HQ variant.
+- Presets: Anime4K modes A, B, C, A+A, B+B and C+A, each in a Fast and an HQ variant.
+  A is for blurry sources, B for ringing and aliasing, C for clean but noisy ones.
 - Encoders: `hevc_videotoolbox` (default) and `h264_videotoolbox`.
 - 8- and 10-bit SDR input. A 10-bit source is written back as 10-bit HEVC by default;
   H.264 has no 10-bit VideoToolbox encoder, so it stays 8-bit. 12-bit and HDR sources

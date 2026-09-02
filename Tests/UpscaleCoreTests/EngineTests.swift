@@ -126,6 +126,34 @@ final class Anime4KEngineTests: XCTestCase {
         }
     }
 
+    /// Mode B is the second golden: it exercises the `Restore_Soft` files, which no
+    /// other test touches, against an mpv screenshot taken with the same ordering.
+    func testModeBHQMatchesMPVReference() throws {
+        let device = try requireDevice()
+        let source = try ImageFixture.load(named: "anime4k_source_640x480")
+        let reference = try ImageFixture.load(named: "anime4k_mode_b_hq_1280x960")
+
+        let engine = try Anime4KEngine(
+            preset: try XCTUnwrap(Preset.preset(id: "mode-b-hq")),
+            device: device
+        )
+        let result = try run(
+            engine: engine,
+            device: device,
+            source: source,
+            targetSize: PixelSize(width: reference.width, height: reference.height)
+        )
+
+        let difference = try result.meanAbsoluteDifference(to: reference)
+        print("mode B (HQ) golden mean abs diff vs mpv: \(difference)/255")
+        if difference >= 2.0 {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("upscale-golden-mode-b-actual.png")
+            try? result.writePNG(to: url)
+            XCTFail("mean abs diff \(difference) >= 2/255; wrote actual output to \(url.path)")
+        }
+    }
+
     func testOutputDiffersFromTheInputUpscale() throws {
         let device = try requireDevice()
         let source = try ImageFixture.load(named: "anime4k_source_640x480")
