@@ -73,7 +73,8 @@ public final class EncodeProcess {
         source: URL,
         media: MediaInfo,
         output: URL,
-        plan: EncodePlan
+        plan: EncodePlan,
+        trim: SkipRange? = nil
     ) {
         self.plan = plan
         self.process = FFmpegProcess(
@@ -83,7 +84,8 @@ public final class EncodeProcess {
                 source: source,
                 media: media,
                 output: output,
-                plan: plan
+                plan: plan,
+                trim: trim
             ),
             standardInput: .pipe,
             standardOutput: .null
@@ -113,7 +115,8 @@ public final class EncodeProcess {
         source: URL,
         media: MediaInfo,
         output: URL,
-        plan: EncodePlan
+        plan: EncodePlan,
+        trim: SkipRange? = nil
     ) -> [String] {
         var arguments = [
             "-nostdin",
@@ -129,7 +132,12 @@ public final class EncodeProcess {
             "-video_size", "\(plan.width)x\(plan.height)",
             "-framerate", plan.frameRate.ffmpegArgument,
             "-i", "pipe:0",
-            // Input 1: the original file, purely as the source of the other streams.
+        ]
+        // Input 1: the original file, purely as the source of the other streams. When a
+        // range is being cut out, the same seek is applied here so the audio and the
+        // subtitles line up with the video arriving on the pipe.
+        arguments += DecodeProcess.trimInputArguments(trim)
+        arguments += [
             "-i", source.path,
             "-map", "0:v:0",
         ]
@@ -146,7 +154,9 @@ public final class EncodeProcess {
 
         arguments += [
             "-map_metadata", "1",
-            "-map_chapters", "1",
+            // Chapter times describe the source timeline; after a cut they would point
+            // at the wrong places, so a trimmed output carries none.
+            "-map_chapters", trim == nil ? "1" : "-1",
             // Never give up waiting for a sparse stream. Subtitle tracks go quiet for
             // minutes at a time, and past ffmpeg's default 10-second interleaving
             // window the muxer stops waiting and flushes audio ahead of the video —
@@ -158,6 +168,13 @@ public final class EncodeProcess {
             "-vf", videoFilter(for: plan),
         ]
         arguments += plan.settings.arguments(for: plan.container)
+        // Both inputs are cut to the same length; without this the copied audio would
+        // run past the end of the trimmed video. `-shortest` finishes the file with the
+        // video: a subtitle event straddling the cut keeps its original duration, and
+        // the container would otherwise claim the length of that event.
+        if trim != nil {
+            arguments += DecodeProcess.trimOutputArguments(trim) + ["-shortest"]
+        }
         arguments += [
             "-r", plan.frameRate.ffmpegArgument,
             "-f", plan.container.ffmpegFormatName,

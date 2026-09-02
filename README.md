@@ -80,8 +80,12 @@ absolute difference of about 0.01/255 — see `Anime4KEngineTests`.
 - Before/after preview on a single frame, with a wipe divider and a time slider, so a
   preset can be judged without running the job.
 - Skip segments: time ranges — detected from opening/ending chapters or typed by hand —
-  bypass the Anime4K chain and are resampled with Lanczos instead. The output keeps its
-  full length, audio sync, subtitles and chapters; nothing is cut.
+  either **resampled** (Lanczos instead of the Anime4K chain, so the output keeps its
+  full length, audio sync, subtitles and chapters) or **cut out** (never decoded at all,
+  so the job costs nothing for them and the output holds only what was kept). Cutting
+  encodes each kept range separately and joins them with a stream copy; a subtitle event
+  that straddles a cut keeps its own duration, which can leave the container reporting a
+  few seconds more than the video holds.
 
 ## Licences
 

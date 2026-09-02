@@ -1,5 +1,24 @@
 import Foundation
 
+/// What a skip range does to the output.
+public enum SkipMode: String, Equatable, Hashable, Sendable, CaseIterable, Codable {
+    /// The frames are still decoded, resampled to the target size and encoded, so the
+    /// output keeps its full length, audio sync, subtitles and chapters. Only the
+    /// expensive part is skipped.
+    case resample
+    /// The frames are never decoded at all: the output holds only the kept parts, with
+    /// audio and subtitles cut to match. Much faster — a mostly-skipped file costs
+    /// nothing for the parts that are gone — but the output is shorter than the source.
+    case cut
+
+    public var displayName: String {
+        switch self {
+        case .resample: return "Resample (keep full length)"
+        case .cut: return "Cut out (shorter output)"
+        }
+    }
+}
+
 /// Everything the user chooses about one conversion.
 public struct UpscaleJobSettings: Equatable, Sendable {
     public var preset: Preset
@@ -9,9 +28,10 @@ public struct UpscaleJobSettings: Equatable, Sendable {
     public var encoder: EncoderSettings
     /// The output container. `nil` keeps the input's own container.
     public var container: OutputContainer?
-    /// Source time ranges that skip the Anime4K chain; they are still resampled and
-    /// encoded, so the output keeps its length.
+    /// Source time ranges that do not go through the Anime4K chain.
     public var skipRanges: [SkipRange]
+    /// What happens to those ranges.
+    public var skipMode: SkipMode
     public var output: URL
 
     public init(
@@ -20,8 +40,10 @@ public struct UpscaleJobSettings: Equatable, Sendable {
         encoder: EncoderSettings = EncoderSettings(),
         container: OutputContainer? = nil,
         skipRanges: [SkipRange] = [],
+        skipMode: SkipMode = .resample,
         output: URL
     ) {
+        self.skipMode = skipMode
         self.preset = preset
         self.scale = scale
         self.encoder = encoder

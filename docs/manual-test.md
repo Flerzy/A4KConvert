@@ -95,6 +95,20 @@ ffmpeg -i sample.mkv -i chapters.txt -map_metadata 1 -map_chapters 1 -c copy cha
    resample — softer than the upscaled part, never a freeze or a black frame.
 6. Turn **Skip Openings and Endings** off, add the file again: the `OP` range is listed
    but unchecked.
+7. Switch **Skipped parts** to **Cut out (shorter output)**. The row summary changes to
+   "Cutting …" and the section shows the length the output will have. Run it: the job
+   takes roughly as long as the kept part alone, and
+
+   ```sh
+   ffprobe -v error -count_frames -select_streams v:0 \
+           -show_entries stream=nb_read_frames -of csv=p=0 out.mkv
+   ```
+
+   counts only the kept frames. Play it: the skipped stretch is gone, audio still lines
+   up, and the file starts and ends on the ranges that were kept.
+8. Mark two ranges to skip with a gap between them and run again in cut mode: the parts
+   are encoded separately and joined, and nothing is left behind next to the output (no
+   `.upscale-…` folder).
 
 ## 2d. Preview
 

@@ -30,6 +30,8 @@ public final class UpscaleJob: @unchecked Sendable {
     private var isCancelled = false
     private var decode: DecodeProcess?
     private var encode: EncodeProcess?
+    /// The final stream-copy join, when the job is cutting ranges out.
+    private var joinProcess: FFmpegProcess?
 
     public init(
         input: URL,
@@ -68,11 +70,13 @@ public final class UpscaleJob: @unchecked Sendable {
         isCancelled = true
         let decode = self.decode
         let encode = self.encode
+        let join = self.joinProcess
         cancelLock.unlock()
 
         // Killing the decoder first unblocks a read that is waiting on its pipe.
         decode?.terminate()
         encode?.terminate()
+        join?.terminate()
     }
 
     private var cancelled: Bool {
@@ -142,26 +146,214 @@ public final class UpscaleJob: @unchecked Sendable {
             throw EngineError.noMetalDevice
         }
 
+        let normalizedSkips = SkipRanges.normalized(
+            settings.skipRanges, duration: media.duration
+        )
+
+        switch settings.skipMode {
+        case .resample:
+            // Frame timestamps come from the forced constant rate, not the container.
+            let skipPlan = SkipPlan(
+                ranges: normalizedSkips, frameRate: media.video.realFrameRate
+            )
+            try runSegment(
+                media: media,
+                plan: plan,
+                engine: engine,
+                decodeFormat: decodeFormat,
+                encodeFormat: encodeFormat,
+                skipPlan: skipPlan,
+                trim: nil,
+                output: settings.output,
+                commandQueue: commandQueue,
+                inputSize: inputSize,
+                targetSize: targetSize,
+                start: start,
+                framesBefore: 0,
+                totalFrames: media.estimatedFrameCount,
+                progress: progress
+            )
+
+        case .cut:
+            try runCut(
+                media: media,
+                plan: plan,
+                engine: engine,
+                decodeFormat: decodeFormat,
+                encodeFormat: encodeFormat,
+                skipped: normalizedSkips,
+                commandQueue: commandQueue,
+                inputSize: inputSize,
+                targetSize: targetSize,
+                start: start,
+                progress: progress
+            )
+        }
+        return media
+    }
+
+    // MARK: - Cutting
+
+    /// Runs one pass per kept range, then joins the parts.
+    ///
+    /// The skipped parts are never decoded, which is the whole point: on a file where
+    /// only the first ninety seconds are wanted, the other twenty-two minutes cost
+    /// nothing at all. Each part is encoded with identical settings, so joining them is
+    /// a stream copy.
+    private func runCut(
+        media: MediaInfo,
+        plan: EncodePlan,
+        engine: Anime4KEngine,
+        decodeFormat: RawFrameFormat,
+        encodeFormat: RawFrameFormat,
+        skipped: [SkipRange],
+        commandQueue: MTLCommandQueue,
+        inputSize: PixelSize,
+        targetSize: PixelSize,
+        start: Date,
+        progress: ((UpscaleProgress) -> Void)?
+    ) throws {
+        let kept = SkipRanges.kept(from: skipped, duration: media.duration)
+        guard !kept.isEmpty else {
+            throw UpscaleError.unsupportedInput(
+                reason: "Every part of the file is skipped, so there is nothing to write."
+            )
+        }
+        // Nothing to cut: one pass over the whole file, no temporary files.
+        guard skipped.contains(where: { $0.duration > 0 }) else {
+            try runSegment(
+                media: media, plan: plan, engine: engine,
+                decodeFormat: decodeFormat, encodeFormat: encodeFormat,
+                skipPlan: SkipPlan(ranges: [], frameRate: media.video.realFrameRate),
+                trim: nil, output: settings.output, commandQueue: commandQueue,
+                inputSize: inputSize, targetSize: targetSize, start: start,
+                framesBefore: 0, totalFrames: media.estimatedFrameCount, progress: progress
+            )
+            return
+        }
+
+        let rate = media.video.realFrameRate.doubleValue
+        let totalFrames = Int(
+            (kept.reduce(0.0) { $0 + min($1.duration, media.duration ?? $1.duration) } * rate)
+                .rounded()
+        )
+        let emptySkipPlan = SkipPlan(ranges: [], frameRate: media.video.realFrameRate)
+
+        if kept.count == 1 {
+            try runSegment(
+                media: media, plan: plan, engine: engine,
+                decodeFormat: decodeFormat, encodeFormat: encodeFormat,
+                skipPlan: emptySkipPlan, trim: kept[0], output: settings.output,
+                commandQueue: commandQueue, inputSize: inputSize, targetSize: targetSize,
+                start: start, framesBefore: 0, totalFrames: totalFrames, progress: progress
+            )
+            return
+        }
+
+        // Parts live beside the output, so joining them never crosses a volume.
+        let workDirectory = settings.output
+            .deletingLastPathComponent()
+            .appendingPathComponent(".upscale-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: workDirectory, withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: workDirectory) }
+
+        var parts: [URL] = []
+        var framesBefore = 0
+        for (index, range) in kept.enumerated() {
+            try checkCancelled()
+            let part = workDirectory.appendingPathComponent(
+                "part-\(index).\(plan.container.fileExtension)"
+            )
+            try runSegment(
+                media: media, plan: plan, engine: engine,
+                decodeFormat: decodeFormat, encodeFormat: encodeFormat,
+                skipPlan: emptySkipPlan, trim: range, output: part,
+                commandQueue: commandQueue, inputSize: inputSize, targetSize: targetSize,
+                start: start, framesBefore: framesBefore, totalFrames: totalFrames,
+                progress: progress
+            )
+            framesBefore += Int((range.duration * rate).rounded())
+            parts.append(part)
+        }
+
+        progress?(UpscaleProgress(
+            phase: .finalizing,
+            framesProcessed: framesBefore,
+            totalFrames: totalFrames,
+            elapsed: Date().timeIntervalSince(start)
+        ))
+        try join(parts: parts, in: workDirectory, to: settings.output, plan: plan)
+    }
+
+    /// Joins the encoded parts with the concat demuxer. Every part came out of the same
+    /// encoder at the same size, so this is a copy, not a re-encode.
+    private func join(parts: [URL], in directory: URL, to output: URL, plan: EncodePlan) throws {
+        let list = directory.appendingPathComponent("parts.txt")
+        let text = parts
+            .map { "file '\($0.path.replacingOccurrences(of: "'", with: "'\\''"))'" }
+            .joined(separator: "\n")
+        try (text + "\n").write(to: list, atomically: true, encoding: .utf8)
+
+        let join = FFmpegProcess(
+            label: "ffmpeg (join)",
+            executable: tools.ffmpeg,
+            arguments: [
+                "-nostdin", "-v", "error", "-y",
+                "-f", "concat", "-safe", "0", "-i", list.path,
+                "-map", "0", "-c", "copy",
+                "-f", plan.container.ffmpegFormatName,
+                output.path,
+            ]
+        )
+        cancelLock.lock()
+        self.joinProcess = join
+        cancelLock.unlock()
+        defer {
+            cancelLock.lock()
+            self.joinProcess = nil
+            cancelLock.unlock()
+        }
+
+        try join.start()
+        try join.waitAndCheck()
+        try checkCancelled()
+    }
+
+    /// One decode/GPU/encode pass over one range of the source, or over all of it.
+    private func runSegment(
+        media: MediaInfo,
+        plan: EncodePlan,
+        engine: Anime4KEngine,
+        decodeFormat: RawFrameFormat,
+        encodeFormat: RawFrameFormat,
+        skipPlan: SkipPlan,
+        trim: SkipRange?,
+        output: URL,
+        commandQueue: MTLCommandQueue,
+        inputSize: PixelSize,
+        targetSize: PixelSize,
+        start: Date,
+        framesBefore: Int,
+        totalFrames: Int?,
+        progress: ((UpscaleProgress) -> Void)?
+    ) throws {
         let decode = DecodeProcess(
-            ffmpeg: tools.ffmpeg, input: input, media: media, format: decodeFormat
+            ffmpeg: tools.ffmpeg, input: input, media: media, format: decodeFormat, trim: trim
         )
         let encode = EncodeProcess(
             ffmpeg: tools.ffmpeg,
             source: input,
             media: media,
-            output: settings.output,
-            plan: plan
+            output: output,
+            plan: plan,
+            trim: trim
         )
         cancelLock.lock()
         self.decode = decode
         self.encode = encode
         cancelLock.unlock()
-
-        // Frame timestamps come from the forced constant rate, not from the container.
-        let skipPlan = SkipPlan(
-            ranges: SkipRanges.normalized(settings.skipRanges, duration: media.duration),
-            frameRate: media.video.realFrameRate
-        )
 
         do {
             try runPipeline(
@@ -176,6 +368,8 @@ public final class UpscaleJob: @unchecked Sendable {
                 inputSize: inputSize,
                 targetSize: targetSize,
                 start: start,
+                framesBefore: framesBefore,
+                totalFrames: totalFrames,
                 progress: progress
             )
         } catch {
@@ -183,7 +377,6 @@ public final class UpscaleJob: @unchecked Sendable {
             encode.terminate()
             throw error
         }
-        return media
     }
 
     // MARK: - Pipeline
@@ -299,6 +492,8 @@ public final class UpscaleJob: @unchecked Sendable {
         inputSize: PixelSize,
         targetSize: PixelSize,
         start: Date,
+        framesBefore: Int,
+        totalFrames: Int?,
         progress: ((UpscaleProgress) -> Void)?
     ) throws {
         try decode.start()
@@ -332,7 +527,6 @@ public final class UpscaleJob: @unchecked Sendable {
         }
 
         var closedPipes = false
-        let totalFrames = media.estimatedFrameCount
         let channel = FrameChannel(slots: slots)
 
         /// Closes our ends of both pipes exactly once.
@@ -355,11 +549,13 @@ public final class UpscaleJob: @unchecked Sendable {
             }
             lastReport = now
             let elapsed = now.timeIntervalSince(start)
+            // A cut job runs one pass per kept range, so the counts carry across passes.
+            let written = framesBefore + writer.framesWritten
             progress?(UpscaleProgress(
                 phase: .processing,
-                framesProcessed: writer.framesWritten,
+                framesProcessed: written,
                 totalFrames: totalFrames,
-                framesPerSecond: elapsed > 0 ? Double(writer.framesWritten) / elapsed : 0,
+                framesPerSecond: elapsed > 0 ? Double(written) / elapsed : 0,
                 elapsed: elapsed,
                 framesPassedThrough: framesPassedThrough
             ))
@@ -466,7 +662,7 @@ public final class UpscaleJob: @unchecked Sendable {
 
         progress?(UpscaleProgress(
             phase: .finalizing,
-            framesProcessed: writer.framesWritten,
+            framesProcessed: framesBefore + writer.framesWritten,
             totalFrames: totalFrames,
             elapsed: Date().timeIntervalSince(start),
             framesPassedThrough: framesPassedThrough

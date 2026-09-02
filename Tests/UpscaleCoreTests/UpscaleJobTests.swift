@@ -136,6 +136,117 @@ final class UpscaleJobTests: XCTestCase {
         XCTAssertEqual(outputDuration, sourceDuration, accuracy: frameDuration * 1.5)
     }
 
+    /// Cutting one range out: only the kept part is decoded and encoded, so the output
+    /// is shorter and the job never touches the rest of the file.
+    func testCutModeWritesOnlyTheKeptRange() throws {
+        let (tools, device) = try requireEnvironment()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fixture = try TestSupport.makeFixture(
+            TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 10.0),
+            in: directory
+        )
+        let output = directory.appendingPathComponent("cut.mkv")
+        let job = UpscaleJob(
+            input: fixture,
+            settings: UpscaleJobSettings(
+                preset: try XCTUnwrap(Preset.preset(id: "mode-a-fast")),
+                scale: 2,
+                skipRanges: [SkipRange(start: 3, end: 10, label: "the rest")],
+                skipMode: .cut,
+                output: output
+            ),
+            tools: tools,
+            device: device
+        )
+        let source = try job.run()
+
+        let result = try Probe(tools: tools).probe(url: output)
+        XCTAssertEqual(result.video.width, source.video.width * 2)
+        XCTAssertEqual(result.audioStreams.count, source.audioStreams.count)
+        // The frame count is the contract: a copied subtitle event that straddles the
+        // cut keeps its own duration, which can leave the container claiming a little
+        // more than the video actually holds.
+        let expected = Int((3 * source.video.realFrameRate.doubleValue).rounded())
+        let written = try frameCount(of: output, tools: tools)
+        XCTAssertEqual(Double(written), Double(expected), accuracy: 2)
+        XCTAssertLessThan(written, Int((10 * source.video.realFrameRate.doubleValue) / 2))
+    }
+
+    /// Two kept ranges are encoded separately and joined, so the output is the sum of
+    /// their lengths with the middle gone.
+    func testCutModeJoinsSeveralKeptRanges() throws {
+        let (tools, device) = try requireEnvironment()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fixture = try TestSupport.makeFixture(
+            TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 10.0),
+            in: directory
+        )
+        let output = directory.appendingPathComponent("cut-parts.mkv")
+        let job = UpscaleJob(
+            input: fixture,
+            settings: UpscaleJobSettings(
+                preset: try XCTUnwrap(Preset.preset(id: "mode-a-fast")),
+                scale: 2,
+                skipRanges: [SkipRange(start: 3, end: 7, label: "middle")],
+                skipMode: .cut,
+                output: output
+            ),
+            tools: tools,
+            device: device
+        )
+        let source = try job.run()
+
+        let result = try Probe(tools: tools).probe(url: output)
+        // 0-3 s and 7-10 s survive, so six seconds of frames rather than ten. A cut
+        // lands on whole frames at each end, so a couple either way is expected.
+        let expected = Int((6 * source.video.realFrameRate.doubleValue).rounded())
+        XCTAssertEqual(
+            Double(try frameCount(of: output, tools: tools)), Double(expected), accuracy: 6
+        )
+        XCTAssertEqual(result.video.width, source.video.width * 2)
+        XCTAssertEqual(result.audioStreams.count, source.audioStreams.count)
+
+        // Nothing may be left behind next to the output.
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            .filter { $0.hasPrefix(".upscale-") }
+        XCTAssertEqual(leftovers, [], "temporary parts were not cleaned up")
+
+        let decoded = try ProcessRunner.run(
+            executable: tools.ffmpeg,
+            arguments: ["-nostdin", "-v", "error", "-i", output.path, "-f", "null", "-"]
+        )
+        XCTAssertEqual(decoded.terminationStatus, 0, decoded.standardError)
+    }
+
+    /// Cut mode with nothing marked is just a normal job.
+    func testCutModeWithoutRangesProcessesTheWholeFile() throws {
+        let (tools, device) = try requireEnvironment()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fixture = try TestSupport.makeFixture(
+            TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 2.0),
+            in: directory
+        )
+        let output = directory.appendingPathComponent("whole.mkv")
+        let job = UpscaleJob(
+            input: fixture,
+            settings: UpscaleJobSettings(scale: 2, skipMode: .cut, output: output),
+            tools: tools,
+            device: device
+        )
+        let source = try job.run()
+        let result = try Probe(tools: tools).probe(url: output)
+        XCTAssertEqual(
+            try XCTUnwrap(result.duration), try XCTUnwrap(source.duration),
+            accuracy: 2 / source.video.realFrameRate.doubleValue
+        )
+    }
+
     /// Decoded frame count, which Matroska does not store in its header.
     private func frameCount(of url: URL, tools: FFmpegTools) throws -> Int {
         let result = try ProcessRunner.run(

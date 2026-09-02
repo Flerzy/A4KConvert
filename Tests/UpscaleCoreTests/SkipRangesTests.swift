@@ -56,6 +56,48 @@ final class SkipRangesTests: XCTestCase {
         )
     }
 
+    // MARK: - Kept ranges
+
+    func testKeptRangesAreTheComplement() {
+        XCTAssertEqual(
+            SkipRanges.kept(from: [SkipRange(start: 90, end: 1440)], duration: 1440),
+            [SkipRange(start: 0, end: 90)]
+        )
+        XCTAssertEqual(
+            SkipRanges.kept(from: [SkipRange(start: 0, end: 90)], duration: 1440),
+            [SkipRange(start: 90, end: 1440)]
+        )
+        XCTAssertEqual(
+            SkipRanges.kept(
+                from: [SkipRange(start: 0, end: 90), SkipRange(start: 1350, end: 1440)],
+                duration: 1440
+            ),
+            [SkipRange(start: 90, end: 1350)]
+        )
+        XCTAssertEqual(
+            SkipRanges.kept(from: [SkipRange(start: 60, end: 120)], duration: 300),
+            [SkipRange(start: 0, end: 60), SkipRange(start: 120, end: 300)]
+        )
+    }
+
+    func testKeptRangesWithNothingSkippedAreTheWholeFile() {
+        XCTAssertEqual(
+            SkipRanges.kept(from: [], duration: 600), [SkipRange(start: 0, end: 600)]
+        )
+    }
+
+    func testSkippingEverythingKeepsNothing() {
+        XCTAssertEqual(SkipRanges.kept(from: [SkipRange(start: 0, end: 600)], duration: 600), [])
+    }
+
+    /// Without a duration the tail is open-ended rather than dropped.
+    func testKeptRangesWithoutADurationRunToTheEnd() {
+        let kept = SkipRanges.kept(from: [SkipRange(start: 0, end: 90)], duration: nil)
+        XCTAssertEqual(kept.count, 1)
+        XCTAssertEqual(kept[0].start, 90)
+        XCTAssertEqual(kept[0].end, .infinity)
+    }
+
     // MARK: - Frame mapping
 
     private let ntsc = Rational(24000, 1001)

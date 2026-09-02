@@ -18,7 +18,8 @@ public final class DecodeProcess {
         input: URL,
         media: MediaInfo,
         format: RawFrameFormat = .bgra,
-        hardwareDecode: Bool = true
+        hardwareDecode: Bool = true,
+        trim: SkipRange? = nil
     ) {
         self.format = format
         self.width = media.video.width
@@ -27,7 +28,8 @@ public final class DecodeProcess {
             label: "ffmpeg (decode)",
             executable: ffmpeg,
             arguments: DecodeProcess.arguments(
-                input: input, media: media, format: format, hardwareDecode: hardwareDecode
+                input: input, media: media, format: format,
+                hardwareDecode: hardwareDecode, trim: trim
             ),
             standardInput: .null,
             standardOutput: .pipe
@@ -38,7 +40,8 @@ public final class DecodeProcess {
         input: URL,
         media: MediaInfo,
         format: RawFrameFormat,
-        hardwareDecode: Bool = true
+        hardwareDecode: Bool = true,
+        trim: SkipRange? = nil
     ) -> [String] {
         [
             "-nostdin",
@@ -47,8 +50,14 @@ public final class DecodeProcess {
         + (usesHardwareDecode(hardwareDecode, codec: media.video.codec)
             ? ["-hwaccel", "videotoolbox"]
             : [])
+        // An input-side seek, so the decoder starts at the nearest keyframe before the
+        // range and drops frames up to it rather than decoding the whole file.
+        + trimInputArguments(trim)
         + [
             "-i", input.path,
+        ]
+        + trimOutputArguments(trim)
+        + [
             "-map", "0:v:0",
             // Normalise to constant frame rate at the stream's nominal rate. The encode
             // side is given the same rate, so frames read and frames written line up and
@@ -59,6 +68,19 @@ public final class DecodeProcess {
             "-pix_fmt", format.ffmpegName,
             "pipe:1",
         ]
+    }
+
+    /// `-ss` before the input, so the seek is a seek and not a decode-and-discard.
+    static func trimInputArguments(_ trim: SkipRange?) -> [String] {
+        guard let trim, trim.start > 0 else { return [] }
+        return ["-ss", String(format: "%.6f", trim.start)]
+    }
+
+    /// `-t` after it: with an input-side seek the output timeline restarts at zero, so
+    /// a duration is unambiguous where `-to` would not be.
+    static func trimOutputArguments(_ trim: SkipRange?) -> [String] {
+        guard let trim, trim.end.isFinite else { return [] }
+        return ["-t", String(format: "%.6f", trim.duration)]
     }
 
     /// Codecs the media engine decodes on every Apple Silicon Mac.

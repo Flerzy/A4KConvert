@@ -55,9 +55,18 @@ public struct QueuedJob: Identifiable, Equatable {
         let ranges = SkipRanges.normalized(settings.skipRanges, duration: media?.duration)
         guard !ranges.isEmpty else { return nil }
         let total = Timecode.format(SkipRanges.totalDuration(ranges))
+        let what = settings.skipMode == .cut ? "Cutting" : "Skipping"
         return ranges.count == 1
-            ? "Skipping 1 segment (\(total))"
-            : "Skipping \(ranges.count) segments (\(total))"
+            ? "\(what) 1 segment (\(total))"
+            : "\(what) \(ranges.count) segments (\(total))"
+    }
+
+    /// How long the output will be, given the skip mode. Nil until the file is probed.
+    public var outputDuration: Double? {
+        guard let duration = media?.duration else { return nil }
+        guard settings.skipMode == .cut else { return duration }
+        let kept = SkipRanges.kept(from: settings.skipRanges, duration: duration)
+        return SkipRanges.totalDuration(kept)
     }
 
     /// Every range the row can show: the detected ones plus any the user typed.
@@ -219,9 +228,12 @@ public final class JobQueue: ObservableObject {
     /// Separate from `applyToAllQueued` because it only makes sense across episodes of
     /// the same show, where the OP and ED sit at the same timestamps.
     public func copySkipRangesToAllQueued(from id: UUID) {
-        guard let ranges = jobs.first(where: { $0.id == id })?.settings.skipRanges else { return }
+        guard let source = jobs.first(where: { $0.id == id })?.settings else { return }
         for index in jobs.indices where jobs[index].state == .queued && jobs[index].id != id {
-            jobs[index].settings.skipRanges = ranges
+            jobs[index].settings.skipRanges = source.skipRanges
+            // The mode travels with the ranges: the same episodes want the same
+            // treatment of their openings.
+            jobs[index].settings.skipMode = source.skipMode
         }
     }
 

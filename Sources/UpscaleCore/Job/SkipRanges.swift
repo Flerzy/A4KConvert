@@ -64,6 +64,32 @@ public enum SkipRanges {
     public static func totalDuration(_ ranges: [SkipRange]) -> Double {
         ranges.reduce(0) { $0 + $1.duration }
     }
+
+    /// The complement of `ranges` inside `[0, duration]`: the parts that are kept.
+    ///
+    /// Used by the cut mode, where the skipped parts are never decoded at all. Without
+    /// a known duration the last kept range runs to the end of the file, spelled as an
+    /// end of `.infinity`, since there is nothing to clamp it against.
+    public static func kept(from ranges: [SkipRange], duration: Double?) -> [SkipRange] {
+        let skipped = normalized(ranges, duration: duration)
+        let end = duration.map { max(0, $0) } ?? .infinity
+        guard !skipped.isEmpty else {
+            return end > 0 ? [SkipRange(start: 0, end: end)] : []
+        }
+
+        var kept: [SkipRange] = []
+        var cursor = 0.0
+        for range in skipped {
+            if range.start > cursor {
+                kept.append(SkipRange(start: cursor, end: min(range.start, end)))
+            }
+            cursor = max(cursor, range.end)
+        }
+        if cursor < end {
+            kept.append(SkipRange(start: cursor, end: end))
+        }
+        return kept.filter { $0.end > $0.start }
+    }
 }
 
 /// Frame-level view of the ranges, built once per job.

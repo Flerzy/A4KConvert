@@ -338,6 +338,25 @@ private struct SkipSegmentsSection: View {
             }
 
             HStack(spacing: 6) {
+                Picker("Skipped parts", selection: modeBinding) {
+                    ForEach(SkipMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .frame(maxWidth: 300)
+                .help(
+                    "Resample keeps the output the same length as the source. Cut out "
+                        + "never decodes the skipped parts, so the job is far quicker and "
+                        + "the output is only as long as what is kept."
+                )
+                if job.settings.skipMode == .cut, let duration = job.outputDuration {
+                    Text("Output: \(Timecode.format(duration))")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+
+            HStack(spacing: 6) {
                 TextField("0:00", text: $startText).frame(width: 70)
                 Text("–")
                 TextField("1:30", text: $endText).frame(width: 70)
@@ -352,6 +371,13 @@ private struct SkipSegmentsSection: View {
         .padding(.top, 4)
         .padding(.leading, 14)
         .font(.caption)
+    }
+
+    private var modeBinding: Binding<SkipMode> {
+        Binding(
+            get: { job.settings.skipMode },
+            set: { value in queue.update(job.id) { $0.skipMode = value } }
+        )
     }
 
     private func binding(for range: SkipRange) -> Binding<Bool> {
