@@ -9,7 +9,9 @@ struct UpscaleApp: App {
         WindowGroup("Upscale") {
             ContentView()
                 .environmentObject(queue)
-                .frame(minWidth: 760, minHeight: 460)
+                // The settings row carries six controls plus three buttons; below this
+                // the pickers start trimming their own labels.
+                .frame(minWidth: 900, minHeight: 460)
         }
         .windowResizability(.contentMinSize)
         .commands {

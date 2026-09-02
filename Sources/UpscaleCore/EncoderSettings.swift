@@ -13,6 +13,15 @@ public enum VideoEncoder: String, CaseIterable, Sendable {
         }
     }
 
+    /// Just the codec. Both encoders are VideoToolbox, so the qualifier only costs
+    /// width in a picker that has to sit next to five other controls.
+    public var shortName: String {
+        switch self {
+        case .hevc: return "HEVC"
+        case .h264: return "H.264"
+        }
+    }
+
     /// QuickTime refuses HEVC in MP4/MOV tagged `hev1`, so it gets `hvc1` there.
     /// Matroska has no such requirement.
     func videoTag(for container: OutputContainer) -> String? {

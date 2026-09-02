@@ -77,48 +77,65 @@ struct JobRow: View {
 
     // MARK: - Settings
 
+    /// Every control gets its caption above it and its own fixed width, so the row
+    /// keeps one baseline and nothing truncates. Inline picker labels do neither: a
+    /// segmented picker lays its label out on a line of its own.
     private var settings: some View {
-        HStack(spacing: 12) {
-            Picker("Preset", selection: presetBinding) {
-                ForEach(Preset.Tier.allCases, id: \.self) { tier in
-                    Section(tier.displayName) {
-                        ForEach(Preset.presets(tier: tier)) { preset in
-                            Text(preset.name).tag(preset)
+        HStack(alignment: .bottom, spacing: 12) {
+            labelled("Preset") {
+                Picker("Preset", selection: presetBinding) {
+                    ForEach(Preset.Tier.allCases, id: \.self) { tier in
+                        Section(tier.displayName) {
+                            ForEach(Preset.presets(tier: tier)) { preset in
+                                Text(preset.name).tag(preset)
+                            }
                         }
                     }
                 }
+                .labelsHidden()
+                .frame(width: 165)
+                .help(job.settings.preset.summary)
             }
-            .frame(maxWidth: 190)
-            .help(job.settings.preset.summary)
 
-            Picker("Scale", selection: scaleBinding) {
-                Text("2x").tag(2)
-                Text("4x").tag(4)
-            }
-            .frame(maxWidth: 110)
-
-            Picker("Encoder", selection: encoderBinding) {
-                ForEach(VideoEncoder.allCases, id: \.self) { encoder in
-                    Text(encoder.displayName).tag(encoder)
+            labelled("Scale") {
+                Picker("Scale", selection: scaleBinding) {
+                    Text("2x").tag(2)
+                    Text("4x").tag(4)
                 }
+                .labelsHidden()
+                .frame(width: 70)
             }
-            .frame(maxWidth: 220)
+
+            labelled("Encoder") {
+                Picker("Encoder", selection: encoderBinding) {
+                    ForEach(VideoEncoder.allCases, id: \.self) { encoder in
+                        Text(encoder.shortName).tag(encoder)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 95)
+                .help(job.settings.encoder.encoder.displayName)
+            }
 
             if job.settings.encoder.encoder.supportsTenBit {
-                Picker("Depth", selection: depthBinding) {
-                    Text("8-bit").tag(8)
-                    Text("10-bit").tag(10)
+                labelled("Depth") {
+                    Picker("Depth", selection: depthBinding) {
+                        Text("8-bit").tag(8)
+                        Text("10-bit").tag(10)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 116)
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 130)
+                .help("Bits per sample in the written file. HEVC only.")
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Quality \(job.settings.encoder.quality)")
-                    .font(.caption)
+            labelled("Quality \(job.settings.encoder.quality)") {
                 Slider(value: qualityBinding, in: 20...95, step: 5)
                     .frame(width: 130)
             }
+
+            Spacer(minLength: 8)
 
             Button("Output…") { queue.presentSavePanel(for: job) }
                 .help(job.settings.output.path)
@@ -143,6 +160,18 @@ struct JobRow: View {
         }
         .disabled(job.state == .probing)
         .controlSize(.small)
+    }
+
+    private func labelled<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            content()
+        }
     }
 
     private var presetBinding: Binding<Preset> {
@@ -257,46 +286,76 @@ private struct SkipSegmentsSection: View {
     @State private var addError: String?
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 4) {
-                if job.allSkipRanges.isEmpty {
-                    Text("No chapters looked like an opening or ending. Add a range below.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(job.allSkipRanges, id: \.self) { range in
-                    HStack(spacing: 6) {
-                        Toggle(isOn: binding(for: range)) {
-                            Text(range.label ?? "Manual")
-                                .frame(width: 140, alignment: .leading)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        Text("\(Timecode.format(range.start)) – \(Timecode.format(range.end))")
-                            .monospacedDigit()
+        VStack(alignment: .leading, spacing: 0) {
+            // A plain DisclosureGroup draws no visible chevron at this control size, so
+            // the section looked like dead text; this header is unmistakably a control.
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .font(.caption2)
+                    Text(job.skipSummary ?? "Skip segments")
+                        .font(.caption)
+                    if let count = detectedCount {
+                        Text("(\(count) detected)")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
-
-                HStack(spacing: 6) {
-                    TextField("0:00", text: $startText).frame(width: 70)
-                    Text("–")
-                    TextField("1:30", text: $endText).frame(width: 70)
-                    Button("Add Range") { addRange() }
-                    Button("Copy to All Queued") { queue.copySkipRangesToAllQueued(from: job.id) }
-                        .disabled(job.settings.skipRanges.isEmpty)
-                }
-                if let addError {
-                    Text(addError).foregroundStyle(.red)
-                }
+                .contentShape(Rectangle())
             }
-            .padding(.top, 4)
-            .font(.caption)
-        } label: {
-            Text(job.skipSummary ?? "Skip segments")
-                .font(.caption)
+            .buttonStyle(.plain)
+            .help("Time ranges that are resampled instead of run through Anime4K")
+
+            if isExpanded {
+                ranges
+            }
         }
         .disabled(job.state == .probing)
         .controlSize(.small)
+    }
+
+    private var detectedCount: Int? {
+        job.detectedSkipRanges.isEmpty ? nil : job.detectedSkipRanges.count
+    }
+
+    private var ranges: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if job.allSkipRanges.isEmpty {
+                Text("No chapters looked like an opening or ending. Add a range below.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(job.allSkipRanges, id: \.self) { range in
+                HStack(spacing: 6) {
+                    Toggle(isOn: binding(for: range)) {
+                        Text(range.label ?? "Manual")
+                            .frame(width: 140, alignment: .leading)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Text("\(Timecode.format(range.start)) – \(Timecode.format(range.end))")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 6) {
+                TextField("0:00", text: $startText).frame(width: 70)
+                Text("–")
+                TextField("1:30", text: $endText).frame(width: 70)
+                Button("Add Range") { addRange() }
+                Button("Copy to All Queued") { queue.copySkipRangesToAllQueued(from: job.id) }
+                    .disabled(job.settings.skipRanges.isEmpty)
+            }
+            if let addError {
+                Text(addError).foregroundStyle(.red)
+            }
+        }
+        .padding(.top, 4)
+        .padding(.leading, 14)
+        .font(.caption)
     }
 
     private func binding(for range: SkipRange) -> Binding<Bool> {
