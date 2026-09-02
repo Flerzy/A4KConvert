@@ -99,6 +99,97 @@ final class JobQueueTests: XCTestCase {
         _ = id
     }
 
+    func testNewJobsStartFromTheDefaults() throws {
+        _ = try TestSupport.requireTools()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let outputFolder = directory.appendingPathComponent("out", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputFolder, withIntermediateDirectories: true)
+        let fixture = try TestSupport.makeFixture(
+            TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 0.5),
+            in: directory
+        )
+
+        let defaults = JobDefaults(
+            presetID: "mode-a-fast", scale: 4, encoder: .h264, quality: 40,
+            outputFolder: outputFolder
+        )
+        let queue = JobQueue(defaults: defaults)
+        try XCTSkipUnless(queue.canRun, queue.environmentError ?? "")
+        queue.add([fixture])
+
+        let settings = queue.jobs[0].settings
+        XCTAssertEqual(settings.preset.id, "mode-a-fast")
+        XCTAssertEqual(settings.scale, 4)
+        XCTAssertEqual(settings.encoder.encoder, .h264)
+        XCTAssertEqual(settings.encoder.quality, 40)
+        XCTAssertEqual(settings.output, outputFolder.appendingPathComponent("fixture.4x.mkv"))
+    }
+
+    /// A batch has to share settings but keep one file per input.
+    func testApplyToAllQueuedSharesSettingsButNotTheFileName() throws {
+        let queue = try makeQueue()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let spec = TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 0.5)
+        let first = try TestSupport.makeFixture(spec, in: directory, name: "ep1")
+        let second = try TestSupport.makeFixture(spec, in: directory, name: "ep2")
+
+        queue.add([first, second])
+        waitForProbes(queue)
+        XCTAssertEqual(queue.jobs.map(\.state), [.queued, .queued])
+
+        let sourceID = queue.jobs[0].id
+        let outputFolder = directory.appendingPathComponent("out", isDirectory: true)
+        queue.update(sourceID) { settings in
+            settings.preset = Preset.preset(id: "mode-a-hq")!
+            settings.scale = 4
+            settings.encoder = EncoderSettings(encoder: .h264, quality: 30)
+            settings.output = outputFolder.appendingPathComponent("anything.mkv")
+        }
+        queue.applyToAllQueued(from: sourceID)
+
+        let target = queue.jobs[1].settings
+        XCTAssertEqual(target.preset.id, "mode-a-hq")
+        XCTAssertEqual(target.scale, 4)
+        XCTAssertEqual(target.encoder, EncoderSettings(encoder: .h264, quality: 30))
+        XCTAssertEqual(target.output, outputFolder.appendingPathComponent("ep2.4x.mkv"))
+        // The source keeps the name the user chose for it.
+        XCTAssertEqual(
+            queue.jobs[0].settings.output, outputFolder.appendingPathComponent("anything.mkv")
+        )
+        XCTAssertNotEqual(queue.jobs[0].settings.output, queue.jobs[1].settings.output)
+    }
+
+    func testMakeDefaultsCopiesTheRowsSettings() throws {
+        let queue = try makeQueue()
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try TestSupport.makeFixture(
+            TestSupport.FixtureSpec(width: 160, height: 120, durationSeconds: 0.5),
+            in: directory
+        )
+        queue.add([fixture])
+        waitForProbes(queue)
+        let id = queue.jobs[0].id
+
+        // An output left beside the input must not turn into a pinned folder.
+        queue.update(id) { $0.scale = 4 }
+        queue.makeDefaults(from: id)
+        XCTAssertEqual(queue.defaults.scale, 4)
+        XCTAssertNil(queue.defaults.outputFolder)
+
+        let outputFolder = directory.appendingPathComponent("out", isDirectory: true)
+        queue.update(id) { settings in
+            settings.encoder = EncoderSettings(encoder: .h264, quality: 30)
+            settings.output = outputFolder.appendingPathComponent("chosen.mkv")
+        }
+        queue.makeDefaults(from: id)
+        XCTAssertEqual(queue.defaults.encoder, .h264)
+        XCTAssertEqual(queue.defaults.quality, 30)
+        XCTAssertEqual(queue.defaults.outputFolder, outputFolder)
+    }
+
     func testFailedProbeSurfacesTheFFmpegMessage() throws {
         let queue = try makeQueue()
         let directory = try TestSupport.makeTemporaryDirectory()

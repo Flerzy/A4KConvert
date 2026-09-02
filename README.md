@@ -64,6 +64,8 @@ absolute difference of about 0.01/255 — see `Anime4KEngineTests`.
 - Encoders: `hevc_videotoolbox` (default) and `h264_videotoolbox`.
 - 8-bit SDR input only. 10-bit and HDR sources are refused with a clear message rather
   than silently producing wrong colours.
+- Preset, scale, encoder, quality and an optional output folder are remembered between
+  launches, and one row's settings can be pushed onto every other queued row.
 
 ## Licences
 

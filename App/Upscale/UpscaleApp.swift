@@ -3,7 +3,7 @@ import UpscaleCore
 
 @main
 struct UpscaleApp: App {
-    @StateObject private var queue = JobQueue()
+    @StateObject private var queue = JobQueue(defaults: DefaultsStore.load())
 
     var body: some Scene {
         WindowGroup("Upscale") {

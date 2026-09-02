@@ -19,6 +19,9 @@ struct ContentView: View {
             load(providers)
             return true
         }
+        .onChange(of: queue.defaults) { defaults in
+            DefaultsStore.save(defaults)
+        }
         .overlay {
             if isTargeted {
                 RoundedRectangle(cornerRadius: 12)
@@ -106,6 +109,16 @@ private struct Toolbar: View {
                 .disabled(!queue.canRun)
             Button("Clear Finished") { queue.removeFinished() }
                 .disabled(!queue.jobs.contains { $0.state.isTerminal })
+            Menu {
+                Button("Default Output Folder…") { queue.presentDefaultFolderPanel() }
+                Button("Reset to Beside Input") { queue.defaults.outputFolder = nil }
+                    .disabled(queue.defaults.outputFolder == nil)
+            } label: {
+                Text(outputFolderLabel)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(queue.defaults.outputFolder?.path ?? "New jobs write beside their input")
             Spacer()
             if queue.isRunning {
                 Button("Cancel All", role: .destructive) { queue.cancelAll() }
@@ -115,5 +128,10 @@ private struct Toolbar: View {
                 .disabled(queue.isRunning || !queue.canRun || !queue.jobs.contains { $0.state == .queued })
         }
         .padding(10)
+    }
+
+    private var outputFolderLabel: String {
+        guard let folder = queue.defaults.outputFolder else { return "Output: beside input" }
+        return "Output: \(folder.lastPathComponent)"
     }
 }

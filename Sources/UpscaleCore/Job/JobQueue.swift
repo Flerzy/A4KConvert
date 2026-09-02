@@ -57,6 +57,8 @@ public final class JobQueue: ObservableObject {
     @Published public private(set) var isRunning = false
     /// Set when ffmpeg or Metal could not be found at all, which blocks everything.
     @Published public private(set) var environmentError: String?
+    /// What a newly added file starts with. The app persists this; the core only uses it.
+    @Published public var defaults: JobDefaults
 
     private let tools: FFmpegTools?
     private let device: MTLDevice?
@@ -70,8 +72,9 @@ public final class JobQueue: ObservableObject {
     /// ever starting work the user did not ask for.
     private var wantsToRun = false
 
-    public init(catalog: ShaderCatalog = ShaderCatalog()) {
+    public init(catalog: ShaderCatalog = ShaderCatalog(), defaults: JobDefaults = .standard) {
         self.catalog = catalog
+        self.defaults = defaults
         let tools = try? FFmpegLocator.locate()
         let device = MTLCreateSystemDefaultDevice()
         self.tools = tools
@@ -93,12 +96,7 @@ public final class JobQueue: ObservableObject {
     public func add(_ urls: [URL]) {
         guard let tools else { return }
         for url in urls {
-            var job = QueuedJob(
-                input: url,
-                settings: UpscaleJobSettings(
-                    output: UpscaleJobSettings.defaultOutputURL(for: url, scale: 2)
-                )
-            )
+            var job = QueuedJob(input: url, settings: defaults.settings(for: url))
             job.state = .probing
             jobs.append(job)
             let id = job.id
@@ -155,6 +153,48 @@ public final class JobQueue: ObservableObject {
               !jobs[index].state.isTerminal, jobs[index].state != .running
         else { return }
         change(&jobs[index].settings)
+    }
+
+    /// Copies one row's preset, scale, encoder and output *folder* onto every queued row.
+    ///
+    /// The file name is deliberately not copied: each target recomputes its own from its
+    /// own input, so a batch never collapses onto a single destination file.
+    public func applyToAllQueued(from id: UUID) {
+        guard let source = jobs.first(where: { $0.id == id })?.settings else { return }
+        let folder = source.output.deletingLastPathComponent()
+        for index in jobs.indices where jobs[index].state == .queued && jobs[index].id != id {
+            jobs[index].settings.preset = source.preset
+            jobs[index].settings.scale = source.scale
+            jobs[index].settings.encoder = source.encoder
+            jobs[index].settings.container = source.container
+            jobs[index].settings.output = JobDefaults.outputURL(
+                for: jobs[index].input, scale: source.scale, in: folder
+            )
+        }
+    }
+
+    /// Makes one row's settings the defaults new files get.
+    ///
+    /// The output folder is only remembered when it is not the input's own folder;
+    /// otherwise the default stays "beside the input", which is what the user picked
+    /// implicitly by never choosing a destination.
+    public func makeDefaults(from id: UUID) {
+        guard let job = jobs.first(where: { $0.id == id }) else { return }
+        let folder = job.settings.output.deletingLastPathComponent()
+        let besideInput = job.input.deletingLastPathComponent()
+        defaults = JobDefaults(
+            presetID: job.settings.preset.id,
+            scale: job.settings.scale,
+            encoder: job.settings.encoder.encoder,
+            quality: job.settings.encoder.quality,
+            outputFolder: JobQueue.isSameFolder(folder, besideInput) ? nil : folder,
+            autoSkipChapters: defaults.autoSkipChapters
+        )
+    }
+
+    private static func isSameFolder(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.resolvingSymlinksInPath().standardizedFileURL
+            == rhs.resolvingSymlinksInPath().standardizedFileURL
     }
 
     /// Puts a finished, failed or cancelled job back in line.

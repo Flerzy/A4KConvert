@@ -47,6 +47,22 @@ extension JobQueue {
         update(job.id) { $0.output = url }
     }
 
+    /// Asks for the folder new jobs write into. Cancelling leaves the current one.
+    @MainActor
+    func presentDefaultFolderPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = defaults.outputFolder
+        panel.prompt = "Choose"
+        panel.message = "Choose where new jobs write their output"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        defaults.outputFolder = url
+    }
+
     @MainActor
     func revealInFinder(_ job: QueuedJob) {
         NSWorkspace.shared.activateFileViewerSelecting([job.settings.output])

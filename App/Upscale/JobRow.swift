@@ -99,6 +99,20 @@ struct JobRow: View {
 
             Button("Output…") { queue.presentSavePanel(for: job) }
                 .help(job.settings.output.path)
+
+            Menu {
+                Button("Apply These Settings to All Queued") {
+                    queue.applyToAllQueued(from: job.id)
+                }
+                Button("Use These Settings as Default") {
+                    queue.makeDefaults(from: job.id)
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 32)
+            .help("Apply these settings elsewhere")
         }
         .disabled(job.state == .probing)
         .controlSize(.small)

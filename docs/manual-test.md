@@ -46,6 +46,24 @@ On a queued row:
    new path in its tooltip.
 6. Set **Scale** back to `2x`.
 
+## 2b. Defaults and batch apply
+
+1. On a queued row, set **Preset** to `Mode A (HQ)`, **Scale** to `4x` and **Encoder**
+   to H.264, then open the row's **⋯** menu and choose
+   **Use These Settings as Default**.
+2. Quit the app, relaunch it and add `sample.mkv` again. The new row already shows
+   `Mode A (HQ)`, `4x` and H.264.
+3. Add a second and third file. On the first row, change the settings again and choose
+   **Apply These Settings to All Queued**. The other rows follow, and each keeps its own
+   output file name — check the **Output…** tooltips differ.
+4. In the toolbar, open the **Output: beside input** menu and pick
+   **Default Output Folder…**; choose an empty folder. The button now shows that
+   folder's name.
+5. Add another file: its **Output…** tooltip points into that folder, and the file name
+   still ends in `.4x.mkv`.
+6. Choose **Reset to Beside Input** in the same menu; a newly added file goes back to
+   writing next to its source. Relaunching keeps whichever of the two was last chosen.
+
 ## 3. Running and cancelling
 
 1. Click **Start**. The row goes to **Running**.
